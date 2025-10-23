@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.v1.router import api_router
+from app.api import api_router
 from app.core.config import get_settings
 from app.db.init_db import init_db
 from app.middlewares.cors import add_cors
