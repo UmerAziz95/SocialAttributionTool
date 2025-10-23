@@ -1,32 +1,38 @@
-from fastapi import FastAPI
 from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
 from app.api.v1.router import api_router
+from app.core.config import get_settings
+from app.db.init_db import init_db
 from app.middlewares.cors import add_cors
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup hooks (e.g., DB check) could go here
+    """Run application start-up and shut-down events."""
+
+    await init_db()
     yield
-    # shutdown hooks go here
+
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="My FastAPI", version="1.0.0", lifespan=lifespan)
+    settings = get_settings()
+    app = FastAPI(title=settings.APP_NAME, version="1.0.0", lifespan=lifespan)
 
-    # CORS (adjust origins if needed)
-    add_cors(app, origins=["http://localhost:3000"])
+    add_cors(app, origins=settings.CORS_ORIGINS)
 
-    # Versioned API
     app.include_router(api_router)
 
-    # Health checks
     @app.get("/health/live")
-    def live():
+    def live() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.get("/health/ready")
-    def ready():
+    def ready() -> dict[str, str]:
         return {"status": "ready"}
 
     return app
+
 
 app = create_app()
