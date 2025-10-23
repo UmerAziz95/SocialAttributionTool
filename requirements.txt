@@ -4,6 +4,7 @@ sqlalchemy>=2.0
 asyncpg
 alembic
 pydantic>=2
+email-validator
 pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
