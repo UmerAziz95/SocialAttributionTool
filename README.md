@@ -52,6 +52,7 @@ app/
 ├── services/                # Domain/business logic orchestrating repositories
 └── main.py                  # FastAPI application factory and health checks
 
+docs/                        # Extended architecture and contributor guides
 requirements.txt             # Python dependency lock-in for reproducible installs
 ```
 
@@ -72,3 +73,9 @@ requirements.txt             # Python dependency lock-in for reproducible instal
 This structure keeps responsibilities well separated, making the codebase easier to
 maintain, test, and extend (for example by adding background workers or additional API
 versions).
+
+## Need a deeper tour?
+
+For a step-by-step walkthrough of the request lifecycle, folder responsibilities,
+and a checklist for adding new features, see
+[`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md).
