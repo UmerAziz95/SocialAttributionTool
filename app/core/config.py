@@ -18,9 +18,10 @@ class Settings(BaseSettings):
     INIT_DB_ON_STARTUP: bool = Field(
         True,
         description=(
-            "When true the application will attempt to create database tables during"
-            " startup. Set to false if the database is managed externally or is not"
-            " available in the current environment."
+            "When true the application will apply Alembic migrations during"
+            " startup to ensure the schema is up to date. Set to false if the"
+            " database is managed externally or is not available in the current"
+            " environment."
         ),
     )
     JWT_SECRET: str = "change_me"
