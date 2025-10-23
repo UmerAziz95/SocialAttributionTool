@@ -18,7 +18,8 @@ each concern can evolve independently.
 1. Create and activate a virtual environment.
 2. Install dependencies: `pip install -r requirements.txt`.
 3. Provide a `.env` file or environment variables with the desired settings (database
-   URL, JWT secret, etc.).
+   URL, JWT secret, etc.). A sample `.env` is committed at the repository root – copy it
+   and adjust credentials for your local environment.
 4. Launch the application locally:
 
    ```bash
@@ -27,6 +28,22 @@ each concern can evolve independently.
 
 The API will expose versioned endpoints beneath `/api/v1`, together with health checks
 under `/health` for operational monitoring.
+
+### Configuration reference
+
+Key settings are provided through environment variables (or a `.env` file when running
+locally):
+
+- `DATABASE_URL` – SQLAlchemy async connection string. Ensure the username/password in
+  the URL correspond to an existing database account; authentication failures during
+  start-up usually mean these credentials do not match the target instance.
+- `INIT_DB_ON_STARTUP` – when `true` (default) the application will attempt to create
+  tables on start. Set it to `false` if schema management happens elsewhere or when you
+  want the server to boot without touching the database (for example, while pointing the
+  API to a remote staging database that is temporarily unavailable).
+- `JWT_SECRET`, `JWT_ALG`, `ACCESS_TOKEN_EXPIRE_MIN` – security-related knobs for token
+  generation.
+- `CORS_ORIGINS` – list of origins allowed to call the API in browsers.
 
 ## Project structure
 

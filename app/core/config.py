@@ -15,6 +15,14 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres",
         description="Database connection string in SQLAlchemy async format.",
     )
+    INIT_DB_ON_STARTUP: bool = Field(
+        True,
+        description=(
+            "When true the application will attempt to create database tables during"
+            " startup. Set to false if the database is managed externally or is not"
+            " available in the current environment."
+        ),
+    )
     JWT_SECRET: str = "change_me"
     JWT_ALG: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MIN: int = 60

@@ -66,6 +66,9 @@ leverage the existing abstractions.
   only.
 - Centralise session/engine creation in `app/db/session.py` so deployments can
   tweak configuration in one place.
+- Toggle the `INIT_DB_ON_STARTUP` setting when deployments manage schema via
+  migrations and should skip the automatic `create_all` call during application
+  startup.
 
 ## Extending the project
 
