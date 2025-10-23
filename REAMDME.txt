@@ -1,0 +1,2 @@
+start environment:  .\venv\Scripts\Activate.ps1
+start the application: python -m uvicorn app.main:app --reload
