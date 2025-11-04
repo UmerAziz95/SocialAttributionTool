@@ -1,5 +1,51 @@
 """Application ORM models."""
 
+from app.models.marketing import (
+    DimAccount,
+    DimAd,
+    DimAdsetOrAdgroup,
+    DimAttribution,
+    DimCampaign,
+    DimCity,
+    DimCountry,
+    DimDMA,
+    DimDate,
+    DimPlatform,
+    DimPostal,
+    DimRegion,
+    EventIngestionLog,
+    FactMarketingDaily,
+    FactModelResults,
+    FactShopifyDaily,
+    MapCityDMA,
+    MapPlatformDMA,
+    MapPostalCityState,
+    MetricAvailability,
+    StgShopifyDailyCity,
+)
 from app.models.user import User
 
-__all__ = ["User"]
+__all__ = [
+    "User",
+    "DimPlatform",
+    "DimDMA",
+    "MapPlatformDMA",
+    "DimAccount",
+    "DimCampaign",
+    "DimAdsetOrAdgroup",
+    "DimAd",
+    "DimAttribution",
+    "DimCountry",
+    "DimRegion",
+    "DimCity",
+    "DimPostal",
+    "DimDate",
+    "FactMarketingDaily",
+    "FactShopifyDaily",
+    "FactModelResults",
+    "StgShopifyDailyCity",
+    "MapCityDMA",
+    "MapPostalCityState",
+    "MetricAvailability",
+    "EventIngestionLog",
+]
