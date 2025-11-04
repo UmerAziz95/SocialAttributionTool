@@ -25,7 +25,8 @@ settings = get_settings()
 
 # Make sure Alembic knows where migrations live and which database URL to use.
 config.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

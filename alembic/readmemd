@@ -1,0 +1,8 @@
+1.After creating or updating model 
+run this
+command:"alembic revision -m "add is_active column to users" --autogenerate"
+it will generate the new migration file
+
+2.Apply the migration
+command: "alembic upgrade head"
+That applies the schema change to your actual database.
