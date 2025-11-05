@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional           
 
-from sqlalchemy import (
+from sqlalchemy import (         
     BigInteger,
     Boolean,
     Date,
@@ -23,8 +23,6 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-
-
 class DimPlatform(Base):
     __tablename__ = "dim_platform"
 
@@ -180,7 +178,7 @@ class FactShopifyDaily(Base):
     add_to_cart: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
-class FactModelResults(Base):
+class FactModelResults(Base):           
     __tablename__ = "fact_model_results"
 
     model_run_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -210,7 +208,7 @@ class FactModelResults(Base):
     )
 
 
-class StgShopifyDailyCity(Base):
+class StgShopifyDailyCity(Base):            
     __tablename__ = "stg_shopify_daily_city"
 
     date_id: Mapped[date] = mapped_column(Date, nullable=False)
@@ -265,7 +263,7 @@ class MapCityDMA(Base):
     dma_id: Mapped[int] = mapped_column(ForeignKey("dim_dma.dma_id"), nullable=False)
     effective_start_date: Mapped[date] = mapped_column(
         Date, nullable=False, server_default=text("'2000-01-01'::date")
-    )
+    )     
     effective_end_date: Mapped[date] = mapped_column(
         Date, nullable=False, server_default=text("'2999-12-31'::date")
     )
