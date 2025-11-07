@@ -15,10 +15,30 @@ from app.schemas.ingestion import (
 from app.services.ingestion.service import FileIngestionService
 from app.services.ingestion.types import IngestionContext
 
-router = APIRouter(prefix="/files", tags=["files"])
+router = APIRouter(
+    prefix="/files",
+    tags=["files"],
+    responses={
+        422: {
+            "description": "Validation error",
+            "content": {"application/json": {"example": {"detail": "..."}}},
+        }
+    },
+)
 
 
-@router.post("/upload", response_model=FileUploadResponse)
+@router.post(
+    "/upload",
+    response_model=FileUploadResponse,
+    summary="Upload a source file",
+    description=(
+        "Upload a raw marketing export. The API writes the file to the server "
+        "storage directory and returns the fully-qualified path so it can be "
+        "referenced in the ingestion request."
+    ),
+    response_description="Metadata for the uploaded file including its storage path.",
+    status_code=201,
+)
 async def upload_file(file: UploadFile) -> FileUploadResponse:
     storage_dir = Path("data/uploads")
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -33,7 +53,17 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
     return FileUploadResponse(saved_path=destination.resolve(), size_bytes=size)
 
 
-@router.post("/ingest/path", response_model=FileIngestionResponse)
+@router.post(
+    "/ingest/path",
+    response_model=FileIngestionResponse,
+    summary="Ingest a previously uploaded file",
+    description=(
+        "Trigger normalization and database ingestion for a file saved on the "
+        "server. Provide optional overrides such as currency code, attribution "
+        "window, or dimension IDs."
+    ),
+    response_description="Result of the ingestion run, including counts and warnings.",
+)
 async def ingest_file_by_path(
     payload: FileIngestionRequest,
     session: AsyncSession = Depends(get_db),
