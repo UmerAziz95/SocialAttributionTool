@@ -7,7 +7,7 @@ from alembic import command
 from alembic.config import Config
 
 from app.core.config import get_settings
-
+                                
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI_PATH = PROJECT_ROOT / "alembic.ini"
 ALEMBIC_SCRIPT_LOCATION = PROJECT_ROOT / "alembic"

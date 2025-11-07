@@ -62,10 +62,10 @@ class DimCampaign(Base):
     campaign_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("dim_account.account_id"), nullable=False)
     external_campaign_id: Mapped[Optional[str]] = mapped_column(Text)
-    campaign_name: Mapped[Optional[str]] = mapped_column(Text)
+    campaign_name: Mapped[Optional[str]] = mapped_column(Text)                                       
 
 
-class DimAdsetOrAdgroup(Base):
+class DimAdsetOrAdgroup(Base):                                               
     __tablename__ = "dim_adset_or_adgroup"
 
     adset_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -92,7 +92,7 @@ class DimAttribution(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
 
 
-class DimCountry(Base):
+class DimCountry(Base):          
     __tablename__ = "dim_country"
 
     country_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -109,7 +109,7 @@ class DimRegion(Base):
     iso_subdivision: Mapped[Optional[str]] = mapped_column(Text)
 
 
-class DimCity(Base):
+class DimCity(Base):          
     __tablename__ = "dim_city"
 
     city_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -117,7 +117,7 @@ class DimCity(Base):
     city_name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class DimPostal(Base):
+class DimPostal(Base): 
     __tablename__ = "dim_postal"
 
     postal_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -125,7 +125,7 @@ class DimPostal(Base):
     postal_code: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class DimDate(Base):
+class DimDate(Base):          
     __tablename__ = "dim_date"
 
     date_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -136,8 +136,8 @@ class DimDate(Base):
     year: Mapped[Optional[int]] = mapped_column(Integer)
 
 
-class FactMarketingDaily(Base):
-    __tablename__ = "fact_marketing_daily"
+class FactMarketingDaily(Base):                               
+    __tablename__ = "fact_marketing_daily"             
 
     fact_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     platform_id: Mapped[int] = mapped_column(ForeignKey("dim_platform.platform_id"), nullable=False)
@@ -159,10 +159,10 @@ class FactMarketingDaily(Base):
     video_view_time: Mapped[Optional[int]] = mapped_column(BigInteger)
     frequency: Mapped[Optional[Decimal]] = mapped_column(Numeric)
     reach: Mapped[Optional[int]] = mapped_column(BigInteger)
-    add_to_cart: Mapped[Optional[int]] = mapped_column(BigInteger)
+    add_to_cart: Mapped[Optional[int]] = mapped_column(BigInteger) 
 
 
-class FactShopifyDaily(Base):
+class FactShopifyDaily(Base): 
     __tablename__ = "fact_shopify_daily"
 
     fact_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

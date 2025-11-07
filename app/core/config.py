@@ -26,13 +26,13 @@ class Settings(BaseSettings):
             " startup to ensure the schema is up to date. Set to false if the"
             " database is managed externally or is not available in the current"
             " environment."
-        ),
-    )
+        ),                                                        
+    )        
     JWT_SECRET: str = Field(
         ...,
         description="Secret used to sign JWT access tokens.",
     )
-    JWT_ALG: str = "HS256"
+    JWT_ALG: str = "HS256"                                                                
     ACCESS_TOKEN_EXPIRE_MIN: int = 60
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
