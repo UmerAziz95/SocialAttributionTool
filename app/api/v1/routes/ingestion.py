@@ -1,7 +1,7 @@
 """Endpoints supporting marketing data ingestion."""
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +53,7 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
     return FileUploadResponse(saved_path=destination.resolve(), size_bytes=size)
 
 
-def _resolve_uploaded_path(provided: Path) -> Path:
+def _resolve_uploaded_path(provided: Path | str) -> Path:
     """Locate an uploaded file based on the provided path or filename.
 
     The upload endpoint returns an absolute path, but users may also supply just the
@@ -62,32 +62,53 @@ def _resolve_uploaded_path(provided: Path) -> Path:
     so ingestion succeeds as long as the file exists within the uploads directory.
     """
 
+    raw_value = str(provided).strip()
+    if not raw_value:
+        raise HTTPException(status_code=400, detail="file_path must be provided")
     storage_dir = Path("data/uploads").resolve()
+    normalized = raw_value.replace("\\", "/")
+
     candidates: list[Path] = []
-
-    if provided.is_absolute():
-        candidates.append(provided)
-    else:
-        candidates.append((Path.cwd() / provided).resolve())
-
-    if provided.name:
-        candidates.append(storage_dir / provided.name)
-
-    if not provided.is_absolute():
-        candidates.append(storage_dir / provided)
-
     seen: set[str] = set()
-    for candidate in candidates:
-        candidate_str = str(candidate)
-        if candidate_str in seen:
-            continue
+
+    def add_candidate(path: Path) -> None:
+        candidate_str = str(path)
+        if not candidate_str or candidate_str in seen:
+            return
+        candidates.append(path)
         seen.add(candidate_str)
-        if candidate.exists():
-            return candidate
+
+    # 1. Use the path as provided (works for absolute/relative POSIX paths).
+    add_candidate(Path(raw_value))
+
+    # 2. Attempt to interpret Windows-style inputs (drive letters or backslashes).
+    if "\\" in raw_value or ":" in raw_value:
+        add_candidate(Path(PureWindowsPath(raw_value)))
+
+    # 3. If the path already contains the uploads directory, align it with the
+    #    actual runtime storage root.
+    marker = "/data/uploads/"
+    if marker in normalized:
+        suffix = normalized.split(marker, 1)[1]
+        add_candidate(storage_dir / suffix)
+
+    # 4. Finally, fall back to matching on the filename only.
+    filename = Path(normalized).name
+    if filename:
+        add_candidate(storage_dir / filename)
+
+    for candidate in candidates:
+        try:
+            candidate_path = candidate if candidate.is_absolute() else candidate.resolve()
+        except OSError:
+            continue
+
+        if candidate_path.exists():
+            return candidate_path
 
     raise HTTPException(
         status_code=404,
-        detail="file_path does not exist in expected upload directories",
+        detail=f"file_path '{raw_value}' does not exist in expected upload directories",
     )
 
 
