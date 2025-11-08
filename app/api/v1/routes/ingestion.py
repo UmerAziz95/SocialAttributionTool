@@ -53,6 +53,44 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
     return FileUploadResponse(saved_path=destination.resolve(), size_bytes=size)
 
 
+def _resolve_uploaded_path(provided: Path) -> Path:
+    """Locate an uploaded file based on the provided path or filename.
+
+    The upload endpoint returns an absolute path, but users may also supply just the
+    filename or a path that differs from the server's runtime root (for example when
+    following documentation examples). This helper searches a few sensible locations
+    so ingestion succeeds as long as the file exists within the uploads directory.
+    """
+
+    storage_dir = Path("data/uploads").resolve()
+    candidates: list[Path] = []
+
+    if provided.is_absolute():
+        candidates.append(provided)
+    else:
+        candidates.append((Path.cwd() / provided).resolve())
+
+    if provided.name:
+        candidates.append(storage_dir / provided.name)
+
+    if not provided.is_absolute():
+        candidates.append(storage_dir / provided)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate_str = str(candidate)
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+        if candidate.exists():
+            return candidate
+
+    raise HTTPException(
+        status_code=404,
+        detail="file_path does not exist in expected upload directories",
+    )
+
+
 @router.post(
     "/ingest/path",
     response_model=FileIngestionResponse,
@@ -68,12 +106,11 @@ async def ingest_file_by_path(
     payload: FileIngestionRequest,
     session: AsyncSession = Depends(get_db),
 ) -> FileIngestionResponse:
-    if not payload.file_path.exists():
-        raise HTTPException(status_code=404, detail="file_path does not exist")
+    file_path = _resolve_uploaded_path(payload.file_path)
 
     context = IngestionContext(
-        file_path=payload.file_path,
-        normalized_path=payload.file_path,
+        file_path=file_path,
+        normalized_path=file_path,
         column_map=payload.column_map or {},
         currency_code=payload.currency_code,
         attribution=payload.attribution,
