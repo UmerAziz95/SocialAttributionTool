@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import EventIngestionLog
 from app.services.ingestion.handlers import HANDLERS
-from app.services.ingestion.logging import get_ingestion_logger
+from app.services.ingestion.logging import get_ingestion_logger, log_event
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import NormalizationResult, normalize_file
 
@@ -24,10 +24,10 @@ class FileIngestionService:
     def _select_handler(self, file_path: Path):
         for handler in self._handlers:
             if handler.matches(file_path.name):
-                self._logger.info(
-                    "HANDLER_SELECTED | file=%s | handler=%s",
-                    file_path,
-                    handler.__class__.__name__,
+                log_event(
+                    "HANDLER_SELECTED",
+                    file=file_path,
+                    handler=handler.__class__.__name__,
                 )
                 return handler
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_path.name}")
@@ -37,39 +37,59 @@ class FileIngestionService:
         session: AsyncSession,
         context: IngestionContext,
     ) -> IngestionResult:
-        self._logger.info(
-            "INGEST_START | file=%s | dry_run=%s",
-            context.file_path,
-            context.dry_run,
+        log_event(
+            "INGEST_START",
+            file=context.file_path,
+            dry_run=context.dry_run,
+            column_map=context.column_map,
+            currency_code=context.currency_code,
+            attribution=context.attribution,
         )
         handler = self._select_handler(context.file_path)
-        self._logger.info("NORMALIZATION_BEGIN | file=%s", context.file_path)
+        log_event("NORMALIZATION_BEGIN", file=context.file_path)
         normalized: NormalizationResult = normalize_file(context.file_path)
         context.normalized_path = normalized.path
-        self._logger.info(
-            "NORMALIZATION_COMPLETE | file=%s | normalized=%s | encoding=%s | delimiter=%s | rows=%s",
-            context.file_path,
-            normalized.path,
-            normalized.encoding,
-            normalized.delimiter,
-            len(normalized.rows),
+        log_event(
+            "NORMALIZATION_COMPLETE",
+            source=context.file_path,
+            normalized=normalized.path,
+            encoding=normalized.encoding,
+            delimiter=normalized.delimiter,
+            row_count=len(normalized.rows),
+            headers=normalized.headers,
         )
 
-        self._logger.info("VALIDATION_BEGIN | handler=%s", handler.__class__.__name__)
+        log_event(
+            "VALIDATION_BEGIN",
+            handler=handler.__class__.__name__,
+            file=context.file_path,
+            normalized=context.normalized_path,
+        )
         await handler.validate(normalized, context)
-        self._logger.info("VALIDATION_COMPLETE | handler=%s", handler.__class__.__name__)
+        log_event(
+            "VALIDATION_COMPLETE",
+            handler=handler.__class__.__name__,
+            file=context.file_path,
+        )
 
         status = "success"
         error_message: str | None = None
         try:
-            self._logger.info("INGESTION_BEGIN | handler=%s", handler.__class__.__name__)
+            log_event(
+                "INGESTION_BEGIN",
+                handler=handler.__class__.__name__,
+                file=context.file_path,
+                normalized=context.normalized_path,
+            )
             result = await handler.ingest(session, normalized, context)
-            self._logger.info(
-                "INGESTION_COMPLETE | handler=%s | inserted=%s | updated=%s | skipped=%s",
-                handler.__class__.__name__,
-                result.inserted,
-                result.updated,
-                result.skipped,
+            log_event(
+                "INGESTION_COMPLETE",
+                handler=handler.__class__.__name__,
+                file=context.file_path,
+                inserted=result.inserted,
+                updated=result.updated,
+                skipped=result.skipped,
+                warnings=result.warnings,
             )
         except Exception as exc:  # noqa: BLE001
             status = "failed"
@@ -100,13 +120,13 @@ class FileIngestionService:
         platform_id = context.column_map.get("platform_id")
         records_fetched = result.inserted + result.updated
         duration = Decimal(str(result.duration_seconds))
-        self._logger.info(
-            "EVENT_LOG | platform_id=%s | status=%s | records=%s | duration=%s | error=%s",
-            platform_id,
-            status,
-            records_fetched,
-            duration,
-            error_message,
+        log_event(
+            "EVENT_LOG_WRITE",
+            platform_id=platform_id,
+            status=status,
+            records=records_fetched,
+            duration_seconds=duration,
+            error=error_message,
         )
         session.add(
             EventIngestionLog(

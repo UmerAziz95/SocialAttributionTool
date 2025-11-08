@@ -10,14 +10,15 @@ from typing import Iterable, Sequence
 
 from fastapi import HTTPException
 
-from app.services.ingestion.logging import get_ingestion_logger
+from app.services.ingestion.logging import get_ingestion_logger, log_event
 
 
 CANDIDATE_ENCODINGS: Sequence[str] = ("utf-8", "utf-8-sig", "latin-1")
 CANDIDATE_DELIMITERS: Sequence[str] = (",", "\t", ";")
 
 
-logger = get_ingestion_logger()
+# Instantiate logger once to ensure file handler is created even if only helper is used.
+get_ingestion_logger()
 
 
 @dataclass(slots=True)
@@ -61,7 +62,7 @@ def detect_encoding(path: Path) -> str:
         except UnicodeDecodeError:
             continue
         else:
-            logger.info("DETECTED_ENCODING | file=%s | encoding=%s", path, encoding)
+            log_event("DETECTED_ENCODING", file=path, encoding=encoding)
             return encoding
     raise HTTPException(status_code=400, detail=f"Unable to detect encoding for {path.name}")
 
@@ -74,12 +75,12 @@ def detect_delimiter(sample: str) -> str:
         if hits > max_hits:
             max_hits = hits
             selected = delimiter
-    logger.info("DETECTED_DELIMITER | sample_preview=%s | delimiter=%r", sample[:120], selected)
+    log_event("DETECTED_DELIMITER", sample_preview=sample[:120], delimiter=selected)
     return selected
 
 
 def normalize_file(path: Path) -> NormalizationResult:
-    logger.info("NORMALIZE_FILE | source=%s", path)
+    log_event("NORMALIZE_FILE", source=path)
     encoding = detect_encoding(path)
     raw_text = path.read_text(encoding=encoding)
 
@@ -119,12 +120,12 @@ def normalize_file(path: Path) -> NormalizationResult:
         for row in normalized_rows:
             writer.writerow(row.values)
 
-    logger.info(
-        "NORMALIZE_FILE_COMPLETE | source=%s | normalized=%s | headers=%s | row_count=%s",
-        path,
-        normalized_path,
-        headers,
-        len(normalized_rows),
+    log_event(
+        "NORMALIZE_FILE_COMPLETE",
+        source=path,
+        normalized=normalized_path,
+        headers=headers,
+        row_count=len(normalized_rows),
     )
     return NormalizationResult(
         path=normalized_path,

@@ -12,7 +12,7 @@ from app.schemas.ingestion import (
     FileIngestionResponse,
     FileUploadResponse,
 )
-from app.services.ingestion.logging import get_ingestion_logger
+from app.services.ingestion.logging import get_ingestion_logger, log_event
 from app.services.ingestion.service import FileIngestionService
 from app.services.ingestion.types import IngestionContext
 
@@ -43,7 +43,11 @@ router = APIRouter(
     status_code=201,
 )
 async def upload_file(file: UploadFile) -> FileUploadResponse:
-    logger.info("UPLOAD_START | filename=%s | content_type=%s", file.filename, file.content_type)
+    log_event(
+        "UPLOAD_START",
+        filename=file.filename,
+        content_type=file.content_type,
+    )
     storage_dir = Path("data/uploads")
     storage_dir.mkdir(parents=True, exist_ok=True)
     destination = storage_dir / file.filename
@@ -55,11 +59,11 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
             buffer.write(chunk)
 
     resolved_path = destination.resolve()
-    logger.info(
-        "UPLOAD_COMPLETE | filename=%s | path=%s | size_bytes=%s",
-        file.filename,
-        resolved_path,
-        size,
+    log_event(
+        "UPLOAD_COMPLETE",
+        filename=file.filename,
+        path=resolved_path,
+        size_bytes=size,
     )
     return FileUploadResponse(saved_path=resolved_path, size_bytes=size)
 
@@ -115,7 +119,11 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
             continue
 
         if candidate_path.exists():
-            logger.info("RESOLVE_PATH_SUCCESS | provided=%s | resolved=%s", raw_value, candidate_path)
+            log_event(
+                "RESOLVE_PATH_SUCCESS",
+                provided=raw_value,
+                resolved=candidate_path,
+            )
             return candidate_path
 
     logger.warning(
@@ -158,17 +166,15 @@ async def ingest_file_by_path(
     )
 
     service = FileIngestionService()
-    logger.info(
-        "INGEST_REQUEST | file=%s | options=%s",
-        file_path,
-        {
-            "currency_code": context.currency_code,
-            "attribution": context.attribution,
-            "dry_run": context.dry_run,
-            "fail_fast": context.fail_fast,
-            "batch_size": context.batch_size,
-            "column_map": context.column_map,
-        },
+    log_event(
+        "INGEST_REQUEST",
+        file=file_path,
+        currency_code=context.currency_code,
+        attribution=context.attribution,
+        dry_run=context.dry_run,
+        fail_fast=context.fail_fast,
+        batch_size=context.batch_size,
+        column_map=context.column_map,
     )
     result = await service.ingest(session, context)
     return FileIngestionResponse(

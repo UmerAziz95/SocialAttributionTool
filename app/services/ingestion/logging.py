@@ -27,4 +27,18 @@ def get_ingestion_logger() -> logging.Logger:
     return logger
 
 
-__all__ = ["get_ingestion_logger"]
+def log_event(event: str, **fields: object) -> None:
+    """Log a structured ingestion event in a consistent key=value format."""
+
+    logger = get_ingestion_logger()
+    serialized_fields = " | ".join(
+        f"{key}={value}" for key, value in sorted(fields.items())
+    )
+    if serialized_fields:
+        message = f"{event} | {serialized_fields}"
+    else:
+        message = event
+    logger.info(message)
+
+
+__all__ = ["get_ingestion_logger", "log_event"]

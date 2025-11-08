@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
+from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import NormalizationResult
@@ -49,23 +50,55 @@ class GoogleSpendHandler(IngestionHandler):
 
         currency_code = context.currency_code or resolver.optional("currency_code")
 
+        log_event(
+            "HANDLER_CONTEXT_RESOLVED",
+            handler=self.__class__.__name__,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaign_id=campaign_id,
+            adset_id=adset_id,
+            ad_id=ad_id,
+            attribution_id=attribution_id,
+            currency_code=currency_code,
+        )
+
         payload: list[dict] = []
         current_date_id: int | None = None
 
-        for row in normalized.rows:
+        for index, row in enumerate(normalized.rows, start=1):
             values = row.values
             label = values.get("spend_by_country_row_only", "")
             maybe_date = parse_date(label)
             if maybe_date:
                 current_date_id = await ensure_date_id(session, maybe_date)
+                log_event(
+                    "GOOGLE_SECTION_DATE",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    label=label,
+                    date=str(maybe_date),
+                    date_id=current_date_id,
+                )
                 continue
 
             spend = parse_decimal(values.get("unnamed_1", ""))
             if spend is None:
+                log_event(
+                    "GOOGLE_ROW_SKIPPED_NO_SPEND",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    label=label,
+                )
                 continue
             if current_date_id is None:
                 result.warnings.append("Skipping Google row without resolved date")
                 result.skipped += 1
+                log_event(
+                    "GOOGLE_ROW_SKIPPED_NO_DATE",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    label=label,
+                )
                 continue
 
             region_id = resolver.resolve_mapping("region_map", label)
@@ -85,12 +118,36 @@ class GoogleSpendHandler(IngestionHandler):
                     "spend": spend,
                 }
             )
+            log_event(
+                "GOOGLE_ROW_READY",
+                handler=self.__class__.__name__,
+                row_index=index,
+                label=label,
+                date_id=current_date_id,
+                region_id=region_id,
+                dma_id=dma_id,
+                spend=spend,
+            )
 
         if context.dry_run or not payload:
+            log_event(
+                "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
+                handler=self.__class__.__name__,
+                rows_considered=len(normalized.rows),
+                payload_rows=len(payload),
+                skipped=result.skipped,
+                warnings=result.warnings,
+            )
             result.inserted = len(payload)
             return result
 
         date_ids = {item["date_id"] for item in payload}
+        log_event(
+            "DATABASE_WRITE_BEGIN",
+            handler=self.__class__.__name__,
+            payload_rows=len(payload),
+            unique_dates=len(date_ids),
+        )
         delete_stmt = delete(FactMarketingDaily).where(
             FactMarketingDaily.platform_id == platform_id,
             FactMarketingDaily.account_id == account_id,
@@ -102,6 +159,14 @@ class GoogleSpendHandler(IngestionHandler):
         await session.execute(delete_stmt)
         await session.execute(insert(FactMarketingDaily), payload)
         await session.commit()
+
+        log_event(
+            "DATABASE_WRITE_COMPLETE",
+            handler=self.__class__.__name__,
+            inserted=len(payload),
+            skipped=result.skipped,
+            warnings=result.warnings,
+        )
 
         result.inserted = len(payload)
         return result

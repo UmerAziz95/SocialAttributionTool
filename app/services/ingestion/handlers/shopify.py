@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.marketing import FactShopifyDaily, StgShopifyDailyCity
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
+from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import NormalizationResult
@@ -65,15 +66,36 @@ class ShopifySalesHandler(ShopifyBaseHandler):
         account_id = resolver.require("account_id")
         attribution_id = resolver.optional("attribution_id")
 
+        log_event(
+            "HANDLER_CONTEXT_RESOLVED",
+            handler=self.__class__.__name__,
+            platform_id=platform_id,
+            account_id=account_id,
+            attribution_id=attribution_id,
+        )
+
         payload: list[dict] = []
-        for row in normalized.rows:
+        for index, row in enumerate(normalized.rows, start=1):
             values = row.values
             parsed_date = parse_date(values.get(self.date_column, ""))
             if not parsed_date:
                 result.skipped += 1
                 result.warnings.append("Skipping row without valid date")
+                log_event(
+                    "SHOPIFY_ROW_SKIPPED_NO_DATE",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    raw=values,
+                )
                 continue
             date_id = await ensure_date_id(session, parsed_date)
+            log_event(
+                "ROW_DATE_RESOLVED",
+                handler=self.__class__.__name__,
+                row_index=index,
+                date=str(parsed_date),
+                date_id=date_id,
+            )
 
             country_iso = resolver.resolve_mapping("country_iso_map", values.get(self.country_column, ""))
             region_code = resolver.resolve_mapping("region_code_map", values.get(self.region_column, ""))
@@ -81,6 +103,12 @@ class ShopifySalesHandler(ShopifyBaseHandler):
             if not country_iso or not region_code or not city_name:
                 result.skipped += 1
                 result.warnings.append("Missing location mapping for Shopify sales row")
+                log_event(
+                    "SHOPIFY_ROW_SKIPPED_LOCATION",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    raw=values,
+                )
                 continue
 
             record = {
@@ -99,8 +127,26 @@ class ShopifySalesHandler(ShopifyBaseHandler):
             for target_column, spec in self.metric_specs.items():
                 record[target_column] = spec.parser(values.get(spec.column, ""))
             payload.append(record)
+            log_event(
+                "ROW_READY",
+                handler=self.__class__.__name__,
+                row_index=index,
+                date_id=date_id,
+                country_iso=country_iso,
+                region_code=region_code,
+                city_name=city_name.lower(),
+                metrics={key: record[key] for key in self.metric_specs.keys()},
+            )
 
         if context.dry_run or not payload:
+            log_event(
+                "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
+                handler=self.__class__.__name__,
+                rows_considered=len(normalized.rows),
+                payload_rows=len(payload),
+                skipped=result.skipped,
+                warnings=result.warnings,
+            )
             result.inserted = len(payload)
             return result
 
@@ -117,8 +163,21 @@ class ShopifySalesHandler(ShopifyBaseHandler):
             ],
             set_=update_columns,
         )
+        log_event(
+            "DATABASE_WRITE_BEGIN",
+            handler=self.__class__.__name__,
+            payload_rows=len(payload),
+            unique_dates=len({item["date_id"] for item in payload}),
+        )
         await session.execute(stmt)
         await session.commit()
+        log_event(
+            "DATABASE_WRITE_COMPLETE",
+            handler=self.__class__.__name__,
+            inserted=len(payload),
+            skipped=result.skipped,
+            warnings=result.warnings,
+        )
 
         result.inserted = len(payload)
         return result
@@ -147,14 +206,27 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
         result = IngestionResult()
 
         payload: list[dict] = []
-        for row in normalized.rows:
+        for index, row in enumerate(normalized.rows, start=1):
             values = row.values
             parsed_date = parse_date(values.get(self.date_column, ""))
             if not parsed_date:
                 result.skipped += 1
                 result.warnings.append("Skipping Shopify session row without date")
+                log_event(
+                    "SHOPIFY_ROW_SKIPPED_NO_DATE",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    raw=values,
+                )
                 continue
             date_id = await ensure_date_id(session, parsed_date)
+            log_event(
+                "ROW_DATE_RESOLVED",
+                handler=self.__class__.__name__,
+                row_index=index,
+                date=str(parsed_date),
+                date_id=date_id,
+            )
 
             country_id = resolver.resolve_mapping("country_map", values.get(self.country_column, ""))
             region_id = resolver.resolve_mapping("region_map", values.get(self.region_column, ""))
@@ -164,6 +236,15 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             if None in (country_id, region_id, city_id, postal_id):
                 result.skipped += 1
                 result.warnings.append("Missing dimension mapping for Shopify session row")
+                log_event(
+                    "SHOPIFY_ROW_SKIPPED_DIMENSION",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    country_id=country_id,
+                    region_id=region_id,
+                    city_id=city_id,
+                    postal_id=postal_id,
+                )
                 continue
 
             record = {
@@ -178,8 +259,27 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             for target_column, spec in self.metric_specs.items():
                 record[target_column] = spec.parser(values.get(spec.column, ""))
             payload.append(record)
+            log_event(
+                "ROW_READY",
+                handler=self.__class__.__name__,
+                row_index=index,
+                date_id=date_id,
+                country_id=country_id,
+                region_id=region_id,
+                city_id=city_id,
+                postal_id=postal_id,
+                metrics={key: record[key] for key in self.metric_specs.keys()},
+            )
 
         if context.dry_run or not payload:
+            log_event(
+                "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
+                handler=self.__class__.__name__,
+                rows_considered=len(normalized.rows),
+                payload_rows=len(payload),
+                skipped=result.skipped,
+                warnings=result.warnings,
+            )
             result.inserted = len(payload)
             return result
 
@@ -195,8 +295,21 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             ],
             set_=update_columns,
         )
+        log_event(
+            "DATABASE_WRITE_BEGIN",
+            handler=self.__class__.__name__,
+            payload_rows=len(payload),
+            unique_dates=len({item["date_id"] for item in payload}),
+        )
         await session.execute(stmt)
         await session.commit()
+        log_event(
+            "DATABASE_WRITE_COMPLETE",
+            handler=self.__class__.__name__,
+            inserted=len(payload),
+            skipped=result.skipped,
+            warnings=result.warnings,
+        )
 
         result.inserted = len(payload)
         return result
