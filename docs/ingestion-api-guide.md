@@ -81,4 +81,13 @@ Following this sequence ensures the full upload → normalize → ingest → log
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
 - Use `"fail_fast": true` to stop processing on the first validation error; otherwise, warnings are collected and returned in the response.
 
+## What happens after normalization?
+
+1. **Handler selection** – Once the normalized copy is produced, the ingestion service finds the first registered handler whose filename pattern matches the request (for example, Meta DMA, Shopify sales, or TikTok region files).
+2. **Validation & mapping** – That handler validates the required columns for its dataset, resolves any dimension IDs (DMA, region, campaign, etc.), and prepares the rows for persistence.
+3. **Database writes** – Unless `dry_run` is enabled, the handler executes the upsert logic that writes the cleaned data into the appropriate staging or fact tables defined in the warehouse schema.
+4. **Event logging** – The service records the outcome in `event_ingestion_log`, capturing counts, status, and runtime so you can audit the ingestion.
+
+No separate API call is required after normalization—the same `/api/v1/files/ingest/path` request performs normalization, validation, database storage, and logging as a single transaction-oriented workflow.
+
 Refer back to this document whenever you need a refresher on the available endpoints or the recommended testing procedure.

@@ -12,8 +12,11 @@ from app.schemas.ingestion import (
     FileIngestionResponse,
     FileUploadResponse,
 )
+from app.services.ingestion.logging import get_ingestion_logger
 from app.services.ingestion.service import FileIngestionService
 from app.services.ingestion.types import IngestionContext
+
+logger = get_ingestion_logger()
 
 router = APIRouter(
     prefix="/files",
@@ -40,6 +43,7 @@ router = APIRouter(
     status_code=201,
 )
 async def upload_file(file: UploadFile) -> FileUploadResponse:
+    logger.info("UPLOAD_START | filename=%s | content_type=%s", file.filename, file.content_type)
     storage_dir = Path("data/uploads")
     storage_dir.mkdir(parents=True, exist_ok=True)
     destination = storage_dir / file.filename
@@ -50,7 +54,14 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
             size += len(chunk)
             buffer.write(chunk)
 
-    return FileUploadResponse(saved_path=destination.resolve(), size_bytes=size)
+    resolved_path = destination.resolve()
+    logger.info(
+        "UPLOAD_COMPLETE | filename=%s | path=%s | size_bytes=%s",
+        file.filename,
+        resolved_path,
+        size,
+    )
+    return FileUploadResponse(saved_path=resolved_path, size_bytes=size)
 
 
 def _resolve_uploaded_path(provided: Path | str) -> Path:
@@ -104,8 +115,14 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
             continue
 
         if candidate_path.exists():
+            logger.info("RESOLVE_PATH_SUCCESS | provided=%s | resolved=%s", raw_value, candidate_path)
             return candidate_path
 
+    logger.warning(
+        "RESOLVE_PATH_FAILED | provided=%s | searched=%s",
+        raw_value,
+        ", ".join(str(c) for c in candidates),
+    )
     raise HTTPException(
         status_code=404,
         detail=f"file_path '{raw_value}' does not exist in expected upload directories",
@@ -141,6 +158,18 @@ async def ingest_file_by_path(
     )
 
     service = FileIngestionService()
+    logger.info(
+        "INGEST_REQUEST | file=%s | options=%s",
+        file_path,
+        {
+            "currency_code": context.currency_code,
+            "attribution": context.attribution,
+            "dry_run": context.dry_run,
+            "fail_fast": context.fail_fast,
+            "batch_size": context.batch_size,
+            "column_map": context.column_map,
+        },
+    )
     result = await service.ingest(session, context)
     return FileIngestionResponse(
         inserted=result.inserted,
