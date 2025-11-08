@@ -25,6 +25,8 @@ class IngestionResult:
     updated: int = 0
     skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+    status: str = "pending"
+    summary: str = ""
     started_at: datetime = field(default_factory=datetime.utcnow)
     finished_at: datetime | None = None
 

@@ -84,10 +84,13 @@ class MarketingHandler(IngestionHandler):
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
-            parsed_date = parse_date(values.get(self.date_column, ""))
+            raw_date = values.get(self.date_column, "") or ""
+            parsed_date = parse_date(raw_date)
             if not parsed_date:
                 skipped += 1
-                warnings.append(f"Skipping row without valid date: {values}")
+                warnings.append(
+                    f"Row {index}: invalid date value '{raw_date}' — provide a parsable date"
+                )
                 log_event(
                     "ROW_SKIPPED_INVALID_DATE",
                     handler=self.__class__.__name__,
@@ -109,10 +112,12 @@ class MarketingHandler(IngestionHandler):
 
             dma_id = None
             if self.dma_column:
-                raw_dma = values.get(self.dma_column, "")
+                raw_dma = values.get(self.dma_column, "") or ""
                 dma_id = resolver.resolve_mapping("dma_map", raw_dma)
                 if raw_dma and dma_id is None:
-                    warnings.append(f"Unknown DMA '{raw_dma}'")
+                    warnings.append(
+                        f"Row {index}: unknown DMA '{raw_dma}' — add a column_map.dma_map entry"
+                    )
                     log_event(
                         "ROW_SKIPPED_UNKNOWN_DMA",
                         handler=self.__class__.__name__,
@@ -126,10 +131,12 @@ class MarketingHandler(IngestionHandler):
 
             region_id = None
             if self.region_column:
-                raw_region = values.get(self.region_column, "")
+                raw_region = values.get(self.region_column, "") or ""
                 region_id = resolver.resolve_mapping("region_map", raw_region)
                 if raw_region and region_id is None:
-                    warnings.append(f"Unknown region '{raw_region}'")
+                    warnings.append(
+                        f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
+                    )
                     log_event(
                         "ROW_SKIPPED_UNKNOWN_REGION",
                         handler=self.__class__.__name__,
@@ -187,6 +194,15 @@ class MarketingHandler(IngestionHandler):
                 warnings=warnings,
             )
             result.inserted = len(payload)
+            if context.dry_run:
+                result.summary = (
+                    f"Dry run prepared {len(payload)} marketing rows for fact_marketing_daily; "
+                    f"skipped {skipped}."
+                )
+            else:
+                result.summary = (
+                    "No marketing rows were written; provide dimension mappings to enable ingestion."
+                )
             return result
 
         delete_stmt = delete(FactMarketingDaily).where(
@@ -224,6 +240,9 @@ class MarketingHandler(IngestionHandler):
         )
 
         result.inserted = len(payload)
+        result.summary = (
+            f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped}."
+        )
         return result
 
 class MetaDMAHandler(MarketingHandler):

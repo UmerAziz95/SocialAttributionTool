@@ -78,6 +78,8 @@ class FileIngestionResponse(BaseModel):
     updated: int = Field(..., ge=0, description="Number of existing rows updated")
     skipped: int = Field(..., ge=0, description="Rows skipped after validation errors")
     warnings: list[str] = Field(default_factory=list, description="Non-fatal warnings")
+    status: str = Field(..., description="Overall ingestion status (ingested, dry_run, no_data, failed)")
+    summary: str = Field(..., description="Human-readable description of what happened during ingestion")
     duration_sec: float = Field(..., ge=0, description="Total execution time in seconds")
     normalized_path: Path = Field(..., description="Location of the normalized CSV copy")
 
@@ -87,7 +89,11 @@ class FileIngestionResponse(BaseModel):
                 "inserted": 250,
                 "updated": 12,
                 "skipped": 3,
-                "warnings": ["3 rows missing DMA mapping"],
+                "warnings": [
+                    "Row 4: unknown DMA 'Reels & Feeds | US Only' — add a column_map.dma_map entry"
+                ],
+                "status": "ingested",
+                "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
                 "duration_sec": 4.21,
                 "normalized_path": "/app/data/uploads/DMA_Performance_Meta__normalized.csv",
             }

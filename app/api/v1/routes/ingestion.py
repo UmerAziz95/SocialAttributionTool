@@ -182,6 +182,8 @@ async def ingest_file_by_path(
         updated=result.updated,
         skipped=result.skipped,
         warnings=result.warnings,
+        status=result.status,
+        summary=result.summary,
         duration_sec=result.duration_seconds,
         normalized_path=context.normalized_path,
     )

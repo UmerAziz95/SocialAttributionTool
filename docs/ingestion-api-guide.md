@@ -50,7 +50,11 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
   "inserted": 250,
   "updated": 12,
   "skipped": 3,
-  "warnings": ["3 rows missing DMA mapping"],
+  "warnings": [
+    "Row 4: unknown DMA 'Reels & Feeds | US Only' — add a column_map.dma_map entry"
+  ],
+  "status": "ingested",
+  "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
   "duration_sec": 4.21,
   "normalized_path": "/app/data/uploads/DMA_Performance_Meta__normalized.csv"
 }
@@ -69,7 +73,7 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
 
 4. **Kick off ingestion** by calling the ingest endpoint with the `file_path` returned in step 3. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
 
-5. **Review the response** to confirm the counts and warnings look correct. A `normalized_path` ending with `__normalized.csv` should be returned, indicating the normalization step succeeded.
+5. **Review the response** to confirm the counts and warnings look correct. The `status` field explains whether rows were ingested, skipped (no data), or if you ran a dry run, while `summary` reiterates the inserted/updated/skipped totals. A `normalized_path` ending with `__normalized.csv` should be returned, indicating the normalization step succeeded.
 
 6. **Verify the event log** by querying the `event_ingestion_log` table. The API writes a record for every ingestion run, including failures, so you can audit the outcomes.
 

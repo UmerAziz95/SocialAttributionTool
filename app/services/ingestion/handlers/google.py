@@ -67,7 +67,7 @@ class GoogleSpendHandler(IngestionHandler):
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
-            label = values.get("spend_by_country_row_only", "")
+            label = values.get("spend_by_country_row_only", "") or ""
             maybe_date = parse_date(label)
             if maybe_date:
                 current_date_id = await ensure_date_id(session, maybe_date)
@@ -91,7 +91,9 @@ class GoogleSpendHandler(IngestionHandler):
                 )
                 continue
             if current_date_id is None:
-                result.warnings.append("Skipping Google row without resolved date")
+                result.warnings.append(
+                    f"Row {index}: no reporting date detected before '{label}' — ensure the file lists a date header row."
+                )
                 result.skipped += 1
                 log_event(
                     "GOOGLE_ROW_SKIPPED_NO_DATE",
@@ -139,6 +141,15 @@ class GoogleSpendHandler(IngestionHandler):
                 warnings=result.warnings,
             )
             result.inserted = len(payload)
+            if context.dry_run:
+                result.summary = (
+                    f"Dry run prepared {len(payload)} Google spend rows for fact_marketing_daily; "
+                    f"skipped {result.skipped}."
+                )
+            else:
+                result.summary = (
+                    "No Google spend rows were written; add date headers or mappings and retry."
+                )
             return result
 
         date_ids = {item["date_id"] for item in payload}
@@ -169,4 +180,7 @@ class GoogleSpendHandler(IngestionHandler):
         )
 
         result.inserted = len(payload)
+        result.summary = (
+            f"Inserted {len(payload)} Google spend rows into fact_marketing_daily; skipped {result.skipped}."
+        )
         return result

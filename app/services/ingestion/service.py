@@ -97,6 +97,10 @@ class FileIngestionService:
             result = IngestionResult()
             result.warnings.append(str(exc))
             result.finished_at = datetime.utcnow()
+            result.status = status
+            result.summary = (
+                f"Handler failed: {error_message}" if error_message else "Handler failed."
+            )
             self._logger.exception(
                 "INGESTION_FAILED | handler=%s | error=%s",
                 handler.__class__.__name__,
@@ -106,6 +110,22 @@ class FileIngestionService:
             raise
         else:
             result.finished_at = datetime.utcnow()
+            if context.dry_run:
+                status = "dry_run"
+            elif result.inserted or result.updated:
+                status = "ingested"
+            else:
+                status = "no_data"
+            result.status = status
+            if not result.summary:
+                action = {
+                    "dry_run": "Dry run completed",
+                    "ingested": "Inserted records into the warehouse",
+                    "no_data": "No rows were written",
+                }.get(status, "Ingestion completed")
+                result.summary = (
+                    f"{action}. Inserted={result.inserted}, Updated={result.updated}, Skipped={result.skipped}."
+                )
             await self._log_event(session, context, result, status, error_message)
             return result
 
@@ -127,6 +147,7 @@ class FileIngestionService:
             records=records_fetched,
             duration_seconds=duration,
             error=error_message,
+            summary=result.summary,
         )
         session.add(
             EventIngestionLog(

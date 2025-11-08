@@ -77,10 +77,13 @@ class ShopifySalesHandler(ShopifyBaseHandler):
         payload: list[dict] = []
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
-            parsed_date = parse_date(values.get(self.date_column, ""))
+            raw_date = values.get(self.date_column, "") or ""
+            parsed_date = parse_date(raw_date)
             if not parsed_date:
                 result.skipped += 1
-                result.warnings.append("Skipping row without valid date")
+                result.warnings.append(
+                    f"Row {index}: invalid date value '{raw_date}' — provide a parsable date"
+                )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_NO_DATE",
                     handler=self.__class__.__name__,
@@ -102,7 +105,9 @@ class ShopifySalesHandler(ShopifyBaseHandler):
             city_name = (values.get(self.city_column, "") or "").strip()
             if not country_iso or not region_code or not city_name:
                 result.skipped += 1
-                result.warnings.append("Missing location mapping for Shopify sales row")
+                result.warnings.append(
+                    f"Row {index}: missing location mapping — ensure country/region/city are present in column_map"
+                )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_LOCATION",
                     handler=self.__class__.__name__,
@@ -148,6 +153,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 warnings=result.warnings,
             )
             result.inserted = len(payload)
+            if context.dry_run:
+                result.summary = (
+                    f"Dry run prepared {len(payload)} Shopify sales rows for stg_shopify_daily_city; "
+                    f"skipped {result.skipped}."
+                )
+            else:
+                result.summary = (
+                    "No Shopify sales rows were written; add location mappings or fix data and retry."
+                )
             return result
 
         stmt = insert(StgShopifyDailyCity).values(payload)
@@ -180,6 +194,9 @@ class ShopifySalesHandler(ShopifyBaseHandler):
         )
 
         result.inserted = len(payload)
+        result.summary = (
+            f"Upserted {len(payload)} Shopify sales rows into stg_shopify_daily_city; skipped {result.skipped}."
+        )
         return result
 
 
@@ -208,10 +225,13 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
         payload: list[dict] = []
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
-            parsed_date = parse_date(values.get(self.date_column, ""))
+            raw_date = values.get(self.date_column, "") or ""
+            parsed_date = parse_date(raw_date)
             if not parsed_date:
                 result.skipped += 1
-                result.warnings.append("Skipping Shopify session row without date")
+                result.warnings.append(
+                    f"Row {index}: invalid date value '{raw_date}' — provide a parsable date"
+                )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_NO_DATE",
                     handler=self.__class__.__name__,
@@ -235,7 +255,9 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
 
             if None in (country_id, region_id, city_id, postal_id):
                 result.skipped += 1
-                result.warnings.append("Missing dimension mapping for Shopify session row")
+                result.warnings.append(
+                    f"Row {index}: missing dimension mapping — provide country/region/city/postal map entries"
+                )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_DIMENSION",
                     handler=self.__class__.__name__,
@@ -281,6 +303,15 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 warnings=result.warnings,
             )
             result.inserted = len(payload)
+            if context.dry_run:
+                result.summary = (
+                    f"Dry run prepared {len(payload)} Shopify session rows for fact_shopify_daily; "
+                    f"skipped {result.skipped}."
+                )
+            else:
+                result.summary = (
+                    "No Shopify session rows were written; add dimension mappings or fix data and retry."
+                )
             return result
 
         stmt = insert(FactShopifyDaily).values(payload)
@@ -312,4 +343,7 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
         )
 
         result.inserted = len(payload)
+        result.summary = (
+            f"Upserted {len(payload)} Shopify session rows into fact_shopify_daily; skipped {result.skipped}."
+        )
         return result
