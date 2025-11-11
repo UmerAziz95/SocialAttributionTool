@@ -53,10 +53,19 @@ async def upload_file(file: UploadFile) -> FileUploadResponse:
     destination = storage_dir / file.filename
 
     size = 0
+    chunks = 0
     with destination.open("wb") as buffer:
         while chunk := await file.read(1024 * 1024):
             size += len(chunk)
             buffer.write(chunk)
+            chunks += 1
+    log_event(
+        "UPLOAD_STREAM_COMPLETE",
+        filename=file.filename,
+        path=destination.resolve(),
+        chunks_written=chunks,
+        total_bytes=size,
+    )
 
     resolved_path = destination.resolve()
     log_event(

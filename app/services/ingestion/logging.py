@@ -27,18 +27,27 @@ def get_ingestion_logger() -> logging.Logger:
     return logger
 
 
-def log_event(event: str, **fields: object) -> None:
-    """Log a structured ingestion event in a consistent key=value format."""
+def log_event(event: str, *, level: int = logging.INFO, **fields: object) -> None:
+    """Log a structured ingestion event in a consistent key=value format.
+
+    Parameters
+    ----------
+    event:
+        Short identifier describing the event (e.g. ``"NORMALIZATION_BEGIN"``).
+    level:
+        Optional logging level to use, defaults to :data:`logging.INFO`.
+    **fields:
+        Additional key/value attributes serialized alongside the event name.
+    """
 
     logger = get_ingestion_logger()
     serialized_fields = " | ".join(
         f"{key}={value}" for key, value in sorted(fields.items())
     )
+    message = event
     if serialized_fields:
-        message = f"{event} | {serialized_fields}"
-    else:
-        message = event
-    logger.info(message)
+        message = f"{message} | {serialized_fields}"
+    logger.log(level, message)
 
 
 __all__ = ["get_ingestion_logger", "log_event"]

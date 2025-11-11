@@ -1,6 +1,7 @@
 """High level service orchestrating file ingestion."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -38,6 +39,12 @@ class FileIngestionService:
         context: IngestionContext,
     ) -> IngestionResult:
         log_event(
+            "STAGE_START",
+            stage="ingestion_pipeline",
+            description="Beginning ingestion orchestration",
+            file=context.file_path,
+        )
+        log_event(
             "INGEST_START",
             file=context.file_path,
             dry_run=context.dry_run,
@@ -46,6 +53,12 @@ class FileIngestionService:
             attribution=context.attribution,
         )
         handler = self._select_handler(context.file_path)
+        log_event(
+            "STAGE_START",
+            stage="normalization",
+            description="Detecting encoding/delimiter and preparing normalized copy",
+            file=context.file_path,
+        )
         log_event("NORMALIZATION_BEGIN", file=context.file_path)
         normalized: NormalizationResult = normalize_file(context.file_path)
         context.normalized_path = normalized.path
@@ -58,6 +71,13 @@ class FileIngestionService:
             row_count=len(normalized.rows),
             headers=normalized.headers,
         )
+        log_event(
+            "STAGE_COMPLETE",
+            stage="normalization",
+            normalized_path=context.normalized_path,
+            row_count=len(normalized.rows),
+            header_count=len(normalized.headers),
+        )
 
         log_event(
             "VALIDATION_BEGIN",
@@ -65,9 +85,22 @@ class FileIngestionService:
             file=context.file_path,
             normalized=context.normalized_path,
         )
+        log_event(
+            "STAGE_START",
+            stage="validation",
+            description="Running handler validation checks",
+            handler=handler.__class__.__name__,
+            file=context.file_path,
+        )
         await handler.validate(normalized, context)
         log_event(
             "VALIDATION_COMPLETE",
+            handler=handler.__class__.__name__,
+            file=context.file_path,
+        )
+        log_event(
+            "STAGE_COMPLETE",
+            stage="validation",
             handler=handler.__class__.__name__,
             file=context.file_path,
         )
@@ -81,6 +114,13 @@ class FileIngestionService:
                 file=context.file_path,
                 normalized=context.normalized_path,
             )
+            log_event(
+                "STAGE_START",
+                stage="database_write",
+                description="Delegating to handler ingest routine",
+                handler=handler.__class__.__name__,
+                normalized=context.normalized_path,
+            )
             result = await handler.ingest(session, normalized, context)
             log_event(
                 "INGESTION_COMPLETE",
@@ -90,6 +130,14 @@ class FileIngestionService:
                 updated=result.updated,
                 skipped=result.skipped,
                 warnings=result.warnings,
+            )
+            log_event(
+                "STAGE_COMPLETE",
+                stage="database_write",
+                handler=handler.__class__.__name__,
+                inserted=result.inserted,
+                updated=result.updated,
+                skipped=result.skipped,
             )
         except Exception as exc:  # noqa: BLE001
             status = "failed"
@@ -101,12 +149,32 @@ class FileIngestionService:
             result.summary = (
                 f"Handler failed: {error_message}" if error_message else "Handler failed."
             )
+            log_event(
+                "INGESTION_ERROR",
+                level=logging.ERROR,
+                handler=handler.__class__.__name__,
+                file=context.file_path,
+                error=error_message,
+            )
+            log_event(
+                "STAGE_COMPLETE",
+                stage="database_write",
+                status="failed",
+                handler=handler.__class__.__name__,
+                error=error_message,
+            )
             self._logger.exception(
                 "INGESTION_FAILED | handler=%s | error=%s",
                 handler.__class__.__name__,
                 exc,
             )
             await self._log_event(session, context, result, status, error_message)
+            log_event(
+                "STAGE_COMPLETE",
+                stage="ingestion_pipeline",
+                status=status,
+                summary=result.summary,
+            )
             raise
         else:
             result.finished_at = datetime.utcnow()
@@ -127,6 +195,13 @@ class FileIngestionService:
                     f"{action}. Inserted={result.inserted}, Updated={result.updated}, Skipped={result.skipped}."
                 )
             await self._log_event(session, context, result, status, error_message)
+            log_event(
+                "STAGE_COMPLETE",
+                stage="ingestion_pipeline",
+                status=status,
+                summary=result.summary,
+                duration_seconds=result.duration_seconds,
+            )
             return result
 
     async def _log_event(
@@ -149,6 +224,11 @@ class FileIngestionService:
             error=error_message,
             summary=result.summary,
         )
+        log_event(
+            "EVENT_LOG_DB_WRITE_BEGIN",
+            platform_id=platform_id,
+            status=status,
+        )
         session.add(
             EventIngestionLog(
                 platform_id=platform_id,
@@ -159,3 +239,8 @@ class FileIngestionService:
             )
         )
         await session.commit()
+        log_event(
+            "EVENT_LOG_DB_WRITE_COMPLETE",
+            platform_id=platform_id,
+            status=status,
+        )

@@ -131,6 +131,15 @@ class GoogleSpendHandler(IngestionHandler):
                 spend=spend,
             )
 
+        log_event(
+            "PAYLOAD_PREPARED",
+            handler=self.__class__.__name__,
+            rows_prepared=len(payload),
+            rows_skipped=result.skipped,
+            warnings_count=len(result.warnings),
+            sample_row=payload[0] if payload else None,
+        )
+
         if context.dry_run or not payload:
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
@@ -158,6 +167,11 @@ class GoogleSpendHandler(IngestionHandler):
             handler=self.__class__.__name__,
             payload_rows=len(payload),
             unique_dates=len(date_ids),
+        )
+        log_event(
+            "DATABASE_DELETE_SCOPE",
+            handler=self.__class__.__name__,
+            date_ids=sorted(date_ids),
         )
         delete_stmt = delete(FactMarketingDaily).where(
             FactMarketingDaily.platform_id == platform_id,

@@ -46,13 +46,15 @@ def _normalize_header(header: str) -> str:
     return header.strip("_")
 
 
-def _drop_blank_rows(rows: Iterable[list[str]]) -> list[list[str]]:
+def _drop_blank_rows(rows: Iterable[list[str]]) -> tuple[list[list[str]], int]:
     cleaned: list[list[str]] = []
+    removed = 0
     for row in rows:
         if all((cell or "").strip() == "" for cell in row):
+            removed += 1
             continue
         cleaned.append([cell.strip() for cell in row])
-    return cleaned
+    return cleaned, removed
 
 
 def detect_encoding(path: Path) -> str:
@@ -92,18 +94,30 @@ def normalize_file(path: Path) -> NormalizationResult:
 
     headers: list[str] | None = None
     data_rows: list[list[str]] = []
+    raw_headers: list[str] | None = None
     for row in reader:
         if not any((cell or "").strip() for cell in row):
             continue
         if headers is None:
+            raw_headers = [cell for cell in row]
             headers = [_normalize_header(cell) for cell in row]
+            log_event(
+                "HEADER_NORMALIZED",
+                raw_headers=raw_headers,
+                normalized_headers=headers,
+            )
             continue
         data_rows.append(row)
 
     if headers is None:
         raise HTTPException(status_code=400, detail=f"{path.name} does not contain a header row")
 
-    data_rows = _drop_blank_rows(data_rows)
+    data_rows, removed_blank = _drop_blank_rows(data_rows)
+    log_event(
+        "BLANK_ROWS_REMOVED",
+        removed_count=removed_blank,
+        remaining_rows=len(data_rows),
+    )
 
     # Ensure consistent row length.
     normalized_rows: list[NormalizedRow] = []
@@ -112,6 +126,11 @@ def normalize_file(path: Path) -> NormalizationResult:
         for index, header in enumerate(headers):
             values[header] = row[index].strip() if index < len(row) else ""
         normalized_rows.append(NormalizedRow(values))
+    log_event(
+        "ROW_ALIGNMENT_COMPLETE",
+        row_count=len(normalized_rows),
+        column_count=len(headers),
+    )
 
     normalized_path = path.with_name(f"{path.stem}__normalized.csv")
     with normalized_path.open("w", encoding="utf-8", newline="") as output_file:
@@ -119,6 +138,11 @@ def normalize_file(path: Path) -> NormalizationResult:
         writer.writeheader()
         for row in normalized_rows:
             writer.writerow(row.values)
+    log_event(
+        "NORMALIZED_FILE_WRITTEN",
+        destination=normalized_path,
+        row_count=len(normalized_rows),
+    )
 
     log_event(
         "NORMALIZE_FILE_COMPLETE",

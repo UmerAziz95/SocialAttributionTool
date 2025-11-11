@@ -184,6 +184,15 @@ class MarketingHandler(IngestionHandler):
         result.skipped = skipped
         result.warnings.extend(warnings)
 
+        log_event(
+            "PAYLOAD_PREPARED",
+            handler=self.__class__.__name__,
+            rows_prepared=len(payload),
+            rows_skipped=skipped,
+            warnings_count=len(warnings),
+            sample_row=payload[0] if payload else None,
+        )
+
         if context.dry_run or not payload:
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
@@ -225,6 +234,13 @@ class MarketingHandler(IngestionHandler):
             unique_dates=len(date_ids),
             unique_dmas=len([item for item in dma_ids if item is not None]),
             unique_regions=len([item for item in region_ids if item is not None]),
+        )
+        log_event(
+            "DATABASE_DELETE_SCOPE",
+            handler=self.__class__.__name__,
+            date_ids=sorted(date_ids),
+            dma_ids=[item for item in dma_ids if item is not None],
+            region_ids=[item for item in region_ids if item is not None],
         )
         await session.execute(delete_stmt)
         if payload:

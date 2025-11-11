@@ -143,6 +143,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 metrics={key: record[key] for key in self.metric_specs.keys()},
             )
 
+        log_event(
+            "PAYLOAD_PREPARED",
+            handler=self.__class__.__name__,
+            rows_prepared=len(payload),
+            rows_skipped=result.skipped,
+            warnings_count=len(result.warnings),
+            sample_row=payload[0] if payload else None,
+        )
+
         if context.dry_run or not payload:
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
@@ -182,6 +191,18 @@ class ShopifySalesHandler(ShopifyBaseHandler):
             handler=self.__class__.__name__,
             payload_rows=len(payload),
             unique_dates=len({item["date_id"] for item in payload}),
+        )
+        log_event(
+            "UPSERT_DETAILS",
+            handler=self.__class__.__name__,
+            conflict_keys=[
+                "date_id",
+                "account_id",
+                "country_iso2",
+                "region_code",
+                "city_name_norm",
+            ],
+            updated_columns=list(update_columns.keys()),
         )
         await session.execute(stmt)
         await session.commit()
@@ -293,6 +314,15 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 metrics={key: record[key] for key in self.metric_specs.keys()},
             )
 
+        log_event(
+            "PAYLOAD_PREPARED",
+            handler=self.__class__.__name__,
+            rows_prepared=len(payload),
+            rows_skipped=result.skipped,
+            warnings_count=len(result.warnings),
+            sample_row=payload[0] if payload else None,
+        )
+
         if context.dry_run or not payload:
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
@@ -331,6 +361,19 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             handler=self.__class__.__name__,
             payload_rows=len(payload),
             unique_dates=len({item["date_id"] for item in payload}),
+        )
+        log_event(
+            "UPSERT_DETAILS",
+            handler=self.__class__.__name__,
+            conflict_keys=[
+                "date_id",
+                "account_id",
+                "country_id",
+                "region_id",
+                "city_id",
+                "postal_id",
+            ],
+            updated_columns=list(update_columns.keys()),
         )
         await session.execute(stmt)
         await session.commit()

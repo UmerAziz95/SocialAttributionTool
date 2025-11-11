@@ -84,7 +84,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 - The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization.
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
 - Use `"fail_fast": true` to stop processing on the first validation error; otherwise, warnings are collected and returned in the response.
-- Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `NORMALIZATION_COMPLETE`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run.
+- Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `STAGE_START`, `HEADER_NORMALIZED`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run.
 
 ## Log Event Reference
 
@@ -92,14 +92,17 @@ The ingestion log provides a chronological narrative across the major stages:
 
 | Event | Description |
 |-------|-------------|
-| `UPLOAD_START` / `UPLOAD_COMPLETE` | Captures incoming files and their saved path on disk. |
+| `UPLOAD_START` / `UPLOAD_STREAM_COMPLETE` / `UPLOAD_COMPLETE` | Captures incoming files, chunk counts, and their saved path on disk. |
 | `RESOLVE_PATH_SUCCESS` | Shows how the ingest endpoint resolved the provided `file_path` argument. |
+| `STAGE_START` / `STAGE_COMPLETE` | Wraps each major phase (normalization, validation, database write, ingestion pipeline) with human-readable descriptions and outcomes. |
 | `INGEST_START` | Lists the normalized options (column map, currency, attribution, dry run flags) supplied for the run. |
-| `NORMALIZE_FILE` → `NORMALIZE_FILE_COMPLETE` | Documents encoding/delimiter detection and the normalized artifact that was generated. |
+| `NORMALIZE_FILE` → `HEADER_NORMALIZED` → `BLANK_ROWS_REMOVED` → `ROW_ALIGNMENT_COMPLETE` → `NORMALIZED_FILE_WRITTEN` → `NORMALIZE_FILE_COMPLETE` | Documents encoding/delimiter detection, header cleanup, row trimming, and creation of the normalized artifact. |
 | `VALIDATION_BEGIN` / `VALIDATION_COMPLETE` | Signals when handler-specific validation starts and ends. |
 | `ROW_*` events | Provide per-row insight such as missing dates or dimension lookups (`ROW_SKIPPED_*`, `ROW_READY`). |
-| `DATABASE_WRITE_BEGIN` / `DATABASE_WRITE_COMPLETE` | Indicates when rows were persisted (or skipped in dry-run scenarios) together with inserted counts and warnings. |
-| `EVENT_LOG_WRITE` | Confirms the API recorded the summary row in `event_ingestion_log`. |
+| `PAYLOAD_PREPARED` | Summarizes how many rows are ready after preprocessing, including warnings and a sample payload. |
+| `DATABASE_DELETE_SCOPE` / `UPSERT_DETAILS` / `DATABASE_WRITE_BEGIN` / `DATABASE_WRITE_COMPLETE` | Indicates when rows were deleted or upserted, along with conflict keys, inserted counts, and warnings. |
+| `EVENT_LOG_WRITE` / `EVENT_LOG_DB_WRITE_BEGIN` / `EVENT_LOG_DB_WRITE_COMPLETE` | Confirms the API recorded the summary row in `event_ingestion_log`. |
+| `INGESTION_ERROR` | Emitted when a handler raises an exception; includes the error message and stage context. |
 
 Reviewing the log after an ingestion call will therefore answer whether normalization succeeded, which rows were skipped (and why), and whether database commits actually occurred.
 
