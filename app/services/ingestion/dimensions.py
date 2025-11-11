@@ -14,6 +14,7 @@ from app.models.marketing import (
     DimAccount,
     DimCampaign,
     DimDate,
+    DimPlatform,
 )
 
 
@@ -61,6 +62,34 @@ async def ensure_date_id(session: AsyncSession, target_date: date) -> int:
     )
     await session.flush()
     return date_id
+
+
+async def ensure_platform_id(
+    session: AsyncSession,
+    platform_id: int,
+    *,
+    name: str | None = None,
+) -> int:
+    """Ensure a platform dimension exists for the supplied identifier."""
+
+    stmt = select(DimPlatform.platform_id).where(DimPlatform.platform_id == platform_id).limit(1)
+    result = await session.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    insert_values = {
+        "platform_id": platform_id,
+        "name": name or f"Platform {platform_id}",
+    }
+
+    await session.execute(
+        insert(DimPlatform)
+        .values(**insert_values)
+        .on_conflict_do_nothing(index_elements=[DimPlatform.platform_id])
+    )
+    await session.flush()
+    return platform_id
 
 
 async def ensure_account_id(
