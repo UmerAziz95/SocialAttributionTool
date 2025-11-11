@@ -11,6 +11,7 @@ from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import (
     DimensionResolver,
+    ensure_account_id,
     ensure_ad_id,
     ensure_adset_id,
     ensure_campaign_id,
@@ -94,6 +95,28 @@ class MarketingHandler(IngestionHandler):
 
         platform_id = self._coerce_int(resolver.require("platform_id"), "platform_id")
         account_id = self._coerce_int(resolver.require("account_id"), "account_id")
+
+        account_external_id = resolver.optional("account_external_id")
+        account_name = resolver.optional("account_name") or resolver.optional("account_label")
+        ensured_account_id = await ensure_account_id(
+            session,
+            account_id,
+            platform_id,
+            external_id=account_external_id,
+            name=account_name,
+        )
+
+        log_event(
+            "ACCOUNT_DIMENSION_ENSURED",
+            handler=self.__class__.__name__,
+            supplied_account_id=account_id,
+            ensured_account_id=ensured_account_id,
+            platform_id=platform_id,
+            account_external_id=account_external_id,
+            account_name=account_name,
+        )
+
+        account_id = ensured_account_id
         attribution_id = await self._resolve_attribution_id(session, context)
         if not attribution_id:
             attribution_id = resolver.optional("attribution_id")

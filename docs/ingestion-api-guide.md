@@ -83,6 +83,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 
 - The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization.
 - Campaign/ad set/ad identifiers are resolved automatically using the names and IDs present in each row. Missing dimensions are created on the fly and reused for subsequent records, but you can override the behaviour with `column_map` keys such as `campaign_id`, `campaign_map`, `adset_map`, or `ad_map`.
+- Accounts are seeded automatically when the supplied `column_map.account_id` does not yet exist. Provide optional hints like `account_external_id` or `account_name` (or `account_label`) in the column map to control the values written to `dim_account`.
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
 - Use `"fail_fast": true` to stop processing on the first validation error; otherwise, warnings are collected and returned in the response.
 - Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `STAGE_START`, `HEADER_NORMALIZED`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run.

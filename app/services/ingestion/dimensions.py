@@ -8,7 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.marketing import DimAd, DimAdsetOrAdgroup, DimCampaign, DimDate
+from app.models.marketing import (
+    DimAd,
+    DimAdsetOrAdgroup,
+    DimAccount,
+    DimCampaign,
+    DimDate,
+)
 
 
 class DimensionResolver:
@@ -55,6 +61,38 @@ async def ensure_date_id(session: AsyncSession, target_date: date) -> int:
     )
     await session.flush()
     return date_id
+
+
+async def ensure_account_id(
+    session: AsyncSession,
+    account_id: int,
+    platform_id: int,
+    *,
+    external_id: str | None = None,
+    name: str | None = None,
+) -> int:
+    """Ensure an account dimension exists for the given identifier."""
+
+    stmt = select(DimAccount.account_id).where(DimAccount.account_id == account_id).limit(1)
+    result = await session.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    insert_values = {
+        "account_id": account_id,
+        "platform_id": platform_id,
+        "external_account_id": external_id,
+        "account_name": name,
+    }
+
+    await session.execute(
+        insert(DimAccount)
+        .values(**insert_values)
+        .on_conflict_do_nothing(index_elements=[DimAccount.account_id])
+    )
+    await session.flush()
+    return account_id
 
 
 async def ensure_campaign_id(
