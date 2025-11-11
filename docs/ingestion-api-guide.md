@@ -82,6 +82,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 ## Additional Notes
 
 - The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization.
+- Campaign/ad set/ad identifiers are resolved automatically using the names and IDs present in each row. Missing dimensions are created on the fly and reused for subsequent records, but you can override the behaviour with `column_map` keys such as `campaign_id`, `campaign_map`, `adset_map`, or `ad_map`.
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
 - Use `"fail_fast": true` to stop processing on the first validation error; otherwise, warnings are collected and returned in the response.
 - Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `STAGE_START`, `HEADER_NORMALIZED`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run.
@@ -99,6 +100,7 @@ The ingestion log provides a chronological narrative across the major stages:
 | `NORMALIZE_FILE` → `HEADER_NORMALIZED` → `BLANK_ROWS_REMOVED` → `ROW_ALIGNMENT_COMPLETE` → `NORMALIZED_FILE_WRITTEN` → `NORMALIZE_FILE_COMPLETE` | Documents encoding/delimiter detection, header cleanup, row trimming, and creation of the normalized artifact. |
 | `VALIDATION_BEGIN` / `VALIDATION_COMPLETE` | Signals when handler-specific validation starts and ends. |
 | `ROW_*` events | Provide per-row insight such as missing dates or dimension lookups (`ROW_SKIPPED_*`, `ROW_READY`). |
+| `ROW_CAMPAIGN_RESOLVED*`, `ROW_ADSET_RESOLVED*`, `ROW_AD_RESOLVED*` | Show how campaign, ad set, and ad identifiers were sourced (column map override, mapping, or freshly created dimension rows). |
 | `PAYLOAD_PREPARED` | Summarizes how many rows are ready after preprocessing, including warnings and a sample payload. |
 | `DATABASE_DELETE_SCOPE` / `UPSERT_DETAILS` / `DATABASE_WRITE_BEGIN` / `DATABASE_WRITE_COMPLETE` | Indicates when rows were deleted or upserted, along with conflict keys, inserted counts, and warnings. |
 | `EVENT_LOG_WRITE` / `EVENT_LOG_DB_WRITE_BEGIN` / `EVENT_LOG_DB_WRITE_COMPLETE` | Confirms the API recorded the summary row in `event_ingestion_log`. |

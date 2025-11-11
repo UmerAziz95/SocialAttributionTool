@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
-from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
+from app.services.ingestion.dimensions import (
+    DimensionResolver,
+    ensure_ad_id,
+    ensure_adset_id,
+    ensure_campaign_id,
+    ensure_date_id,
+)
 from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal, parse_int
 from app.services.ingestion.types import IngestionContext, IngestionResult
@@ -29,6 +35,16 @@ class MarketingHandler(IngestionHandler):
     dma_column: str | None = None
     region_column: str | None = None
     metric_specs: dict[str, MetricSpec] = {}
+    campaign_name_fields: tuple[str, ...] = ("campaign_name",)
+    campaign_external_id_fields: tuple[str, ...] = ("campaign_id", "external_campaign_id")
+    adset_name_fields: tuple[str, ...] = ("adset_name", "ad_group_name")
+    adset_external_id_fields: tuple[str, ...] = (
+        "adset_id",
+        "ad_group_id",
+        "external_adset_id",
+    )
+    ad_name_fields: tuple[str, ...] = ("ad_name",)
+    ad_external_id_fields: tuple[str, ...] = ("ad_id", "external_ad_id")
 
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         lowered = file_path.lower()
@@ -38,9 +54,34 @@ class MarketingHandler(IngestionHandler):
         self, normalized: NormalizationResult, context: IngestionContext
     ) -> None:  # type: ignore[override]
         self._ensure_required_columns(normalized, self.required_columns)
-        for key in ("platform_id", "account_id", "campaign_id", "adset_id", "ad_id"):
+        for key in ("platform_id", "account_id"):
             if key not in context.column_map:
                 raise ValueError(f"column_map must include '{key}' for marketing ingestions")
+
+        self._ensure_dimension_inputs(
+            normalized,
+            context,
+            direct_key="campaign_id",
+            map_key="campaign_map",
+            candidates=self.campaign_name_fields + self.campaign_external_id_fields,
+            label="campaign",
+        )
+        self._ensure_dimension_inputs(
+            normalized,
+            context,
+            direct_key="adset_id",
+            map_key="adset_map",
+            candidates=self.adset_name_fields + self.adset_external_id_fields,
+            label="ad set/ad group",
+        )
+        self._ensure_dimension_inputs(
+            normalized,
+            context,
+            direct_key="ad_id",
+            map_key="ad_map",
+            candidates=self.ad_name_fields + self.ad_external_id_fields,
+            label="ad",
+        )
 
     async def ingest(
         self,
@@ -51,11 +92,8 @@ class MarketingHandler(IngestionHandler):
         resolver = DimensionResolver(context.column_map)
         result = IngestionResult()
 
-        platform_id = resolver.require("platform_id")
-        account_id = resolver.require("account_id")
-        campaign_id = resolver.require("campaign_id")
-        adset_id = resolver.require("adset_id")
-        ad_id = resolver.require("ad_id")
+        platform_id = self._coerce_int(resolver.require("platform_id"), "platform_id")
+        account_id = self._coerce_int(resolver.require("account_id"), "account_id")
         attribution_id = await self._resolve_attribution_id(session, context)
         if not attribution_id:
             attribution_id = resolver.optional("attribution_id")
@@ -67,9 +105,6 @@ class MarketingHandler(IngestionHandler):
             handler=self.__class__.__name__,
             platform_id=platform_id,
             account_id=account_id,
-            campaign_id=campaign_id,
-            adset_id=adset_id,
-            ad_id=ad_id,
             attribution_id=attribution_id,
             currency_code=currency_code,
         )
@@ -81,6 +116,9 @@ class MarketingHandler(IngestionHandler):
         dma_ids: set[int | None] = set()
         region_ids: set[int | None] = set()
         date_ids: set[int] = set()
+        campaign_cache: dict[tuple[int, str, str], int] = {}
+        adset_cache: dict[tuple[int, str, str], int] = {}
+        ad_cache: dict[tuple[int, str, str], int] = {}
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
@@ -109,6 +147,48 @@ class MarketingHandler(IngestionHandler):
                 date=str(parsed_date),
                 date_id=date_id,
             )
+
+            campaign_id = await self._resolve_campaign_id(
+                session,
+                resolver,
+                account_id,
+                values,
+                campaign_cache,
+                index,
+                warnings,
+                context,
+            )
+            if campaign_id is None:
+                skipped += 1
+                continue
+
+            adset_id = await self._resolve_adset_id(
+                session,
+                resolver,
+                campaign_id,
+                values,
+                adset_cache,
+                index,
+                warnings,
+                context,
+            )
+            if adset_id is None:
+                skipped += 1
+                continue
+
+            ad_id = await self._resolve_ad_id(
+                session,
+                resolver,
+                adset_id,
+                values,
+                ad_cache,
+                index,
+                warnings,
+                context,
+            )
+            if ad_id is None:
+                skipped += 1
+                continue
 
             dma_id = None
             if self.dma_column:
@@ -260,6 +340,275 @@ class MarketingHandler(IngestionHandler):
             f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped}."
         )
         return result
+
+    def _ensure_dimension_inputs(
+        self,
+        normalized: NormalizationResult,
+        context: IngestionContext,
+        *,
+        direct_key: str,
+        map_key: str,
+        candidates: Iterable[str],
+        label: str,
+    ) -> None:
+        if direct_key in context.column_map or map_key in context.column_map:
+            return
+        if any(column in normalized.headers for column in candidates):
+            return
+        readable = ", ".join(sorted(candidates))
+        raise ValueError(
+            f"Provide column_map.{direct_key} or include one of [{readable}] columns to resolve the {label}."
+        )
+
+    def _coerce_int(self, value: object, label: str) -> int:
+        try:
+            return int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):  # pragma: no cover - defensive guard
+            raise ValueError(f"{label} must be an integer, received {value!r}")
+
+    def _first_non_empty(self, values: dict[str, str], candidates: Iterable[str]) -> str | None:
+        for candidate in candidates:
+            raw = values.get(candidate)
+            if raw and raw.strip():
+                return raw.strip()
+        return None
+
+    def _candidate_values(self, values: dict[str, str], candidates: Iterable[str]) -> list[str]:
+        collected: list[str] = []
+        for candidate in candidates:
+            raw = values.get(candidate)
+            if raw and raw.strip():
+                collected.append(raw.strip())
+        return collected
+
+    def _normalized_key(self, *parts: str | None) -> str:
+        normalized = "|".join((part or "").strip().lower() for part in parts)
+        return normalized
+
+    async def _resolve_campaign_id(
+        self,
+        session: AsyncSession,
+        resolver: DimensionResolver,
+        account_id: int,
+        values: dict[str, str],
+        cache: dict[tuple[int, str, str], int],
+        row_index: int,
+        warnings: list[str],
+        context: IngestionContext,
+    ) -> int | None:
+        if "campaign_id" in resolver.column_map:
+            campaign_id = self._coerce_int(resolver.require("campaign_id"), "campaign_id")
+            log_event(
+                "ROW_CAMPAIGN_RESOLVED_COLUMN_MAP",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                campaign_id=campaign_id,
+            )
+            return campaign_id
+
+        for candidate in self._candidate_values(
+            values, self.campaign_name_fields + self.campaign_external_id_fields
+        ):
+            mapped = resolver.resolve_mapping("campaign_map", candidate)
+            if mapped is not None:
+                campaign_id = self._coerce_int(mapped, "campaign_map")
+                log_event(
+                    "ROW_CAMPAIGN_RESOLVED_MAPPING",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    campaign_id=campaign_id,
+                    source_value=candidate,
+                )
+                return campaign_id
+
+        campaign_name = self._first_non_empty(values, self.campaign_name_fields)
+        campaign_external_id = self._first_non_empty(values, self.campaign_external_id_fields)
+        cache_key = (account_id, self._normalized_key(campaign_external_id), self._normalized_key(campaign_name))
+
+        if cache_key[1] == "" and cache_key[2] == "":
+            warning = (
+                f"Row {row_index}: unable to determine campaign from the file — provide column_map.campaign_map "
+                "or include campaign columns."
+            )
+            warnings.append(warning)
+            log_event(
+                "ROW_SKIPPED_CAMPAIGN_UNRESOLVED",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                raw=values,
+            )
+            if context.fail_fast:
+                raise ValueError("Unable to resolve campaign for row")
+            return None
+
+        if cache_key in cache:
+            return cache[cache_key]
+
+        campaign_id = await ensure_campaign_id(
+            session,
+            account_id,
+            external_id=campaign_external_id,
+            name=campaign_name,
+        )
+        cache[cache_key] = campaign_id
+        log_event(
+            "ROW_CAMPAIGN_RESOLVED",
+            handler=self.__class__.__name__,
+            row_index=row_index,
+            campaign_id=campaign_id,
+            campaign_name=campaign_name,
+            external_campaign_id=campaign_external_id,
+        )
+        return campaign_id
+
+    async def _resolve_adset_id(
+        self,
+        session: AsyncSession,
+        resolver: DimensionResolver,
+        campaign_id: int,
+        values: dict[str, str],
+        cache: dict[tuple[int, str, str], int],
+        row_index: int,
+        warnings: list[str],
+        context: IngestionContext,
+    ) -> int | None:
+        if "adset_id" in resolver.column_map:
+            adset_id = self._coerce_int(resolver.require("adset_id"), "adset_id")
+            log_event(
+                "ROW_ADSET_RESOLVED_COLUMN_MAP",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                adset_id=adset_id,
+            )
+            return adset_id
+
+        for candidate in self._candidate_values(
+            values, self.adset_name_fields + self.adset_external_id_fields
+        ):
+            mapped = resolver.resolve_mapping("adset_map", candidate)
+            if mapped is not None:
+                adset_id = self._coerce_int(mapped, "adset_map")
+                log_event(
+                    "ROW_ADSET_RESOLVED_MAPPING",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    adset_id=adset_id,
+                    source_value=candidate,
+                )
+                return adset_id
+
+        adset_name = self._first_non_empty(values, self.adset_name_fields)
+        adset_external_id = self._first_non_empty(values, self.adset_external_id_fields)
+        cache_key = (campaign_id, self._normalized_key(adset_external_id), self._normalized_key(adset_name))
+
+        if cache_key[1] == "" and cache_key[2] == "":
+            warning = (
+                f"Row {row_index}: unable to determine ad set/ad group — provide column_map.adset_map "
+                "or ensure ad set columns exist."
+            )
+            warnings.append(warning)
+            log_event(
+                "ROW_SKIPPED_ADSET_UNRESOLVED",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                raw=values,
+            )
+            if context.fail_fast:
+                raise ValueError("Unable to resolve ad set for row")
+            return None
+
+        if cache_key in cache:
+            return cache[cache_key]
+
+        adset_id = await ensure_adset_id(
+            session,
+            campaign_id,
+            external_id=adset_external_id,
+            name=adset_name,
+        )
+        cache[cache_key] = adset_id
+        log_event(
+            "ROW_ADSET_RESOLVED",
+            handler=self.__class__.__name__,
+            row_index=row_index,
+            adset_id=adset_id,
+            adset_name=adset_name,
+            external_adset_id=adset_external_id,
+        )
+        return adset_id
+
+    async def _resolve_ad_id(
+        self,
+        session: AsyncSession,
+        resolver: DimensionResolver,
+        adset_id: int,
+        values: dict[str, str],
+        cache: dict[tuple[int, str, str], int],
+        row_index: int,
+        warnings: list[str],
+        context: IngestionContext,
+    ) -> int | None:
+        if "ad_id" in resolver.column_map:
+            ad_id = self._coerce_int(resolver.require("ad_id"), "ad_id")
+            log_event(
+                "ROW_AD_RESOLVED_COLUMN_MAP",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                ad_id=ad_id,
+            )
+            return ad_id
+
+        for candidate in self._candidate_values(values, self.ad_name_fields + self.ad_external_id_fields):
+            mapped = resolver.resolve_mapping("ad_map", candidate)
+            if mapped is not None:
+                ad_id = self._coerce_int(mapped, "ad_map")
+                log_event(
+                    "ROW_AD_RESOLVED_MAPPING",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    ad_id=ad_id,
+                    source_value=candidate,
+                )
+                return ad_id
+
+        ad_name = self._first_non_empty(values, self.ad_name_fields)
+        ad_external_id = self._first_non_empty(values, self.ad_external_id_fields)
+        cache_key = (adset_id, self._normalized_key(ad_external_id), self._normalized_key(ad_name))
+
+        if cache_key[1] == "" and cache_key[2] == "":
+            warning = (
+                f"Row {row_index}: unable to determine ad — provide column_map.ad_map or ensure ad columns exist."
+            )
+            warnings.append(warning)
+            log_event(
+                "ROW_SKIPPED_AD_UNRESOLVED",
+                handler=self.__class__.__name__,
+                row_index=row_index,
+                raw=values,
+            )
+            if context.fail_fast:
+                raise ValueError("Unable to resolve ad for row")
+            return None
+
+        if cache_key in cache:
+            return cache[cache_key]
+
+        ad_id = await ensure_ad_id(
+            session,
+            adset_id,
+            external_id=ad_external_id,
+            name=ad_name,
+        )
+        cache[cache_key] = ad_id
+        log_event(
+            "ROW_AD_RESOLVED",
+            handler=self.__class__.__name__,
+            row_index=row_index,
+            ad_id=ad_id,
+            ad_name=ad_name,
+            external_ad_id=ad_external_id,
+        )
+        return ad_id
 
 class MetaDMAHandler(MarketingHandler):
     file_patterns = ("dma_performance_meta",)
