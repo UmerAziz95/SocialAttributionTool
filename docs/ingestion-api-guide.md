@@ -50,9 +50,7 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
   "inserted": 250,
   "updated": 12,
   "skipped": 3,
-  "warnings": [
-    "Row 4: unknown DMA 'Reels & Feeds | US Only' — add a column_map.dma_map entry"
-  ],
+  "warnings": [],
   "status": "ingested",
   "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
   "duration_sec": 4.21,
@@ -83,6 +81,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 
 - The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization.
 - Campaign/ad set/ad identifiers are resolved automatically using the names and IDs present in each row. Missing dimensions are created on the fly and reused for subsequent records, but you can override the behaviour with `column_map` keys such as `campaign_id`, `campaign_map`, `adset_map`, or `ad_map`.
+- DMA labels are resolved automatically. The service first looks for an explicit `column_map.dma_map` override, then for an existing `map_platform_dma` row, and finally creates the `dim_dma` + `map_platform_dma` records when a new label is encountered. If a DMA string still cannot be resolved (for example "Unknown"), the row is ingested with a `NULL` `dma_id` and a warning so you can backfill a mapping later without losing the metric values.
 - Accounts are seeded automatically when the supplied `column_map.account_id` does not yet exist. Provide optional hints like `account_external_id` or `account_name` (or `account_label`) in the column map to control the values written to `dim_account`.
 - Platforms are also created on demand when the specified `column_map.platform_id` is missing; include `platform_name` or `platform_label` in the column map to set the `dim_platform.name` value.
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
@@ -101,7 +100,7 @@ The ingestion log provides a chronological narrative across the major stages:
 | `INGEST_START` | Lists the normalized options (column map, currency, attribution, dry run flags) supplied for the run. |
 | `NORMALIZE_FILE` → `HEADER_NORMALIZED` → `BLANK_ROWS_REMOVED` → `ROW_ALIGNMENT_COMPLETE` → `NORMALIZED_FILE_WRITTEN` → `NORMALIZE_FILE_COMPLETE` | Documents encoding/delimiter detection, header cleanup, row trimming, and creation of the normalized artifact. |
 | `VALIDATION_BEGIN` / `VALIDATION_COMPLETE` | Signals when handler-specific validation starts and ends. |
-| `ROW_*` events | Provide per-row insight such as missing dates or dimension lookups (`ROW_SKIPPED_*`, `ROW_READY`). |
+| `ROW_*` events | Provide per-row insight such as missing dates or dimension lookups (`ROW_DMA_AUTO_MAPPED`, `ROW_DMA_UNRESOLVED`, `ROW_SKIPPED_*`, `ROW_READY`). |
 | `PLATFORM_DIMENSION_ENSURED` / `ACCOUNT_DIMENSION_ENSURED` | Confirm that prerequisite platform/account records existed or were auto-created before campaign resolution. |
 | `ROW_CAMPAIGN_RESOLVED*`, `ROW_ADSET_RESOLVED*`, `ROW_AD_RESOLVED*` | Show how campaign, ad set, and ad identifiers were sourced (column map override, mapping, or freshly created dimension rows). |
 | `PAYLOAD_PREPARED` | Summarizes how many rows are ready after preprocessing, including warnings and a sample payload. |

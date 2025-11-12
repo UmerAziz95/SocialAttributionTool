@@ -16,6 +16,7 @@ from app.services.ingestion.dimensions import (
     ensure_adset_id,
     ensure_campaign_id,
     ensure_date_id,
+    ensure_dma_id,
     ensure_platform_id,
 )
 from app.services.ingestion.logging import log_event
@@ -235,20 +236,34 @@ class MarketingHandler(IngestionHandler):
             if self.dma_column:
                 raw_dma = values.get(self.dma_column, "") or ""
                 dma_id = resolver.resolve_mapping("dma_map", raw_dma)
+                if dma_id is not None:
+                    dma_id = self._coerce_int(dma_id, "dma_id")
+                elif raw_dma:
+                    dma_id = await ensure_dma_id(
+                        session,
+                        platform_id,
+                        label=raw_dma,
+                    )
+                    if dma_id is not None:
+                        log_event(
+                            "ROW_DMA_AUTO_MAPPED",
+                            handler=self.__class__.__name__,
+                            row_index=index,
+                            raw_value=raw_dma,
+                            dma_id=dma_id,
+                        )
                 if raw_dma and dma_id is None:
                     warnings.append(
-                        f"Row {index}: unknown DMA '{raw_dma}' — add a column_map.dma_map entry"
+                        f"Row {index}: unknown DMA '{raw_dma}' — add a column_map.dma_map entry or supply dma_map overrides"
                     )
                     log_event(
-                        "ROW_SKIPPED_UNKNOWN_DMA",
+                        "ROW_DMA_UNRESOLVED",
                         handler=self.__class__.__name__,
                         row_index=index,
                         raw_value=raw_dma,
                     )
                     if context.fail_fast:
                         raise ValueError(f"Unable to resolve DMA '{raw_dma}'")
-                    skipped += 1
-                    continue
 
             region_id = None
             if self.region_column:

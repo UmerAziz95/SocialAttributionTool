@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +14,10 @@ from app.models.marketing import (
     DimAdsetOrAdgroup,
     DimAccount,
     DimCampaign,
+    DimDMA,
     DimDate,
     DimPlatform,
+    MapPlatformDMA,
 )
 
 
@@ -72,24 +75,97 @@ async def ensure_platform_id(
 ) -> int:
     """Ensure a platform dimension exists for the supplied identifier."""
 
-    stmt = select(DimPlatform.platform_id).where(DimPlatform.platform_id == platform_id).limit(1)
-    result = await session.execute(stmt)
-    existing = result.scalar_one_or_none()
+    existing = await session.get(DimPlatform, platform_id)
     if existing:
-        return existing
+        return existing.platform_id
 
-    insert_values = {
-        "platform_id": platform_id,
-        "name": name or f"Platform {platform_id}",
-    }
-
-    await session.execute(
-        insert(DimPlatform)
-        .values(**insert_values)
-        .on_conflict_do_nothing(index_elements=[DimPlatform.platform_id])
-    )
+    platform = DimPlatform(platform_id=platform_id, name=name or f"Platform {platform_id}")
+    session.add(platform)
     await session.flush()
-    return platform_id
+    return platform.platform_id
+
+
+async def _generate_unique_dma_code(session: AsyncSession, base_label: str) -> str:
+    """Return a unique DMA code derived from the provided label."""
+
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", base_label).strip("_").upper()
+    if not slug:
+        slug = "DMA"
+
+    candidate = slug
+    suffix = 1
+    while True:
+        stmt = select(DimDMA.dma_id).where(DimDMA.dma_code == candidate).limit(1)
+        existing = (await session.execute(stmt)).scalar_one_or_none()
+        if existing is None:
+            return candidate
+        candidate = f"{slug}_{suffix}"
+        suffix += 1
+
+
+async def ensure_dma_id(
+    session: AsyncSession,
+    platform_id: int,
+    *,
+    label: str,
+) -> int | None:
+    """Ensure a DMA exists for the supplied platform-specific label."""
+
+    normalized_label = " ".join(label.strip().split())
+    if not normalized_label:
+        return None
+
+    # Check for an existing platform-specific mapping first.
+    stmt = (
+        select(MapPlatformDMA.dma_id)
+        .where(
+            MapPlatformDMA.platform_id == platform_id,
+            func.lower(MapPlatformDMA.platform_dma_label)
+            == normalized_label.lower(),
+        )
+        .limit(1)
+    )
+    existing_dma_id = (await session.execute(stmt)).scalar_one_or_none()
+    if existing_dma_id is not None:
+        return existing_dma_id
+
+    # Look for an existing DMA dimension by name.
+    stmt = (
+        select(DimDMA)
+        .where(func.lower(DimDMA.dma_name) == normalized_label.lower())
+        .limit(1)
+    )
+    existing_dma = (await session.execute(stmt)).scalar_one_or_none()
+
+    if existing_dma is None:
+        dma_code = await _generate_unique_dma_code(session, normalized_label)
+        existing_dma = DimDMA(dma_code=dma_code, dma_name=normalized_label)
+        session.add(existing_dma)
+        await session.flush()
+
+    dma_id = existing_dma.dma_id
+
+    # Persist the platform mapping so subsequent ingestions reuse it.
+    stmt = (
+        select(MapPlatformDMA.id)
+        .where(
+            MapPlatformDMA.platform_id == platform_id,
+            func.lower(MapPlatformDMA.platform_dma_label)
+            == normalized_label.lower(),
+        )
+        .limit(1)
+    )
+    existing_mapping = (await session.execute(stmt)).scalar_one_or_none()
+    if existing_mapping is None:
+        mapping = MapPlatformDMA(
+            platform_id=platform_id,
+            platform_dma_label=normalized_label,
+            dma_id=dma_id,
+        )
+        session.add(mapping)
+        await session.flush()
+
+    return dma_id
 
 
 async def ensure_account_id(
