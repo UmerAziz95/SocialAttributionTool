@@ -18,6 +18,7 @@ from app.services.ingestion.dimensions import (
     ensure_date_id,
     ensure_dma_id,
     ensure_platform_id,
+    standardize_dma_label,
 )
 from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal, parse_int
@@ -253,6 +254,7 @@ class MarketingHandler(IngestionHandler):
             dma_placeholder = False
             if self.dma_column:
                 raw_dma = values.get(self.dma_column, "") or ""
+                normalized_dma_label = standardize_dma_label(raw_dma)
                 if raw_dma:
                     if self._should_treat_dma_as_null(raw_dma):
                         include_null_dma = True
@@ -262,6 +264,7 @@ class MarketingHandler(IngestionHandler):
                             handler=self.__class__.__name__,
                             row_index=index,
                             raw_value=raw_dma,
+                            standardized_value=normalized_dma_label,
                         )
                     else:
                         dma_id = resolver.resolve_mapping("dma_map", raw_dma)
@@ -273,6 +276,7 @@ class MarketingHandler(IngestionHandler):
                                 row_index=index,
                                 raw_value=raw_dma,
                                 dma_id=dma_id,
+                                standardized_value=normalized_dma_label,
                             )
                         else:
                             dma_id = await ensure_dma_id(
@@ -287,6 +291,7 @@ class MarketingHandler(IngestionHandler):
                                     row_index=index,
                                     raw_value=raw_dma,
                                     dma_id=dma_id,
+                                    standardized_value=normalized_dma_label,
                                 )
                         if dma_id is None:
                             include_null_dma = True
@@ -299,6 +304,7 @@ class MarketingHandler(IngestionHandler):
                                     handler=self.__class__.__name__,
                                     row_index=index,
                                     raw_value=raw_dma,
+                                    standardized_value=normalized_dma_label,
                                 )
                                 if context.fail_fast:
                                     raise ValueError(f"Unable to resolve DMA '{raw_dma}'")

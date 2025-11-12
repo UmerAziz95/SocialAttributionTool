@@ -115,43 +115,54 @@ async def ensure_dma_id(
     if not normalized_label:
         return None
 
-    # Check for an existing platform-specific mapping first.
-    stmt = (
-        select(MapPlatformDMA.dma_id)
-        .where(
-            MapPlatformDMA.platform_id == platform_id,
-            func.lower(MapPlatformDMA.platform_dma_label)
-            == normalized_label.lower(),
-        )
-        .limit(1)
-    )
-    existing_dma_id = (await session.execute(stmt)).scalar_one_or_none()
-    if existing_dma_id is not None:
-        return existing_dma_id
+    standardized_label = standardize_dma_label(normalized_label)
+    search_labels = {normalized_label.lower()}
+    if standardized_label:
+        search_labels.add(standardized_label.lower())
 
-    # Look for an existing DMA dimension by name.
-    stmt = (
-        select(DimDMA)
-        .where(func.lower(DimDMA.dma_name) == normalized_label.lower())
-        .limit(1)
-    )
-    existing_dma = (await session.execute(stmt)).scalar_one_or_none()
+    # Check for an existing platform-specific mapping first.  We try both the
+    # raw label (to support legacy rows) and the standardized version so that
+    # future lookups collapse onto a consistent value.
+    for candidate in search_labels:
+        stmt = (
+            select(MapPlatformDMA.dma_id)
+            .where(
+                MapPlatformDMA.platform_id == platform_id,
+                func.lower(MapPlatformDMA.platform_dma_label) == candidate,
+            )
+            .limit(1)
+        )
+        existing_dma_id = (await session.execute(stmt)).scalar_one_or_none()
+        if existing_dma_id is not None:
+            return existing_dma_id
+
+    # Look for an existing DMA dimension by name using the same set of
+    # candidate labels.
+    existing_dma = None
+    for candidate in search_labels:
+        stmt = select(DimDMA).where(func.lower(DimDMA.dma_name) == candidate).limit(1)
+        existing_dma = (await session.execute(stmt)).scalar_one_or_none()
+        if existing_dma is not None:
+            break
 
     if existing_dma is None:
-        dma_code = await _generate_unique_dma_code(session, normalized_label)
-        existing_dma = DimDMA(dma_code=dma_code, dma_name=normalized_label)
+        label_for_storage = standardized_label or normalized_label
+        dma_code = await _generate_unique_dma_code(session, label_for_storage)
+        existing_dma = DimDMA(dma_code=dma_code, dma_name=label_for_storage)
         session.add(existing_dma)
         await session.flush()
 
     dma_id = existing_dma.dma_id
 
-    # Persist the platform mapping so subsequent ingestions reuse it.
+    # Persist the platform mapping so subsequent ingestions reuse it.  Always
+    # store the standardized label so equivalent vendor spellings map to the
+    # same identifier.
+    label_for_mapping = (standardized_label or normalized_label).lower()
     stmt = (
         select(MapPlatformDMA.id)
         .where(
             MapPlatformDMA.platform_id == platform_id,
-            func.lower(MapPlatformDMA.platform_dma_label)
-            == normalized_label.lower(),
+            func.lower(MapPlatformDMA.platform_dma_label) == label_for_mapping,
         )
         .limit(1)
     )
@@ -159,7 +170,7 @@ async def ensure_dma_id(
     if existing_mapping is None:
         mapping = MapPlatformDMA(
             platform_id=platform_id,
-            platform_dma_label=normalized_label,
+            platform_dma_label=standardized_label or normalized_label,
             dma_id=dma_id,
         )
         session.add(mapping)
@@ -360,3 +371,17 @@ async def ensure_ad_id(
     ad_id = result.scalar_one()
     await session.flush()
     return ad_id
+DMA_LABEL_SUFFIX_RE = re.compile(r",?\s*dma(?:®|\(r\))?(?:\s*(?:market|region))?\.?$", re.IGNORECASE)
+
+
+def standardize_dma_label(label: str) -> str:
+    """Return a cleaned version of the DMA label suitable for dimension lookups."""
+
+    compacted = " ".join(label.strip().split())
+    if not compacted:
+        return ""
+
+    cleaned = DMA_LABEL_SUFFIX_RE.sub("", compacted)
+    cleaned = cleaned.strip(" -_/")
+    return cleaned or compacted
+
