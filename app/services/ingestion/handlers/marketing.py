@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import FactMarketingDaily
@@ -38,6 +38,16 @@ class MarketingHandler(IngestionHandler):
     dma_column: str | None = None
     region_column: str | None = None
     metric_specs: dict[str, MetricSpec] = {}
+    dma_null_tokens: tuple[str, ...] = (
+        "unknown",
+        "not reported",
+        "not set",
+        "not available",
+        "n/a",
+        "na",
+        "-",
+        "--",
+    )
     campaign_name_fields: tuple[str, ...] = ("campaign_name",)
     campaign_external_id_fields: tuple[str, ...] = ("campaign_id", "external_campaign_id")
     adset_name_fields: tuple[str, ...] = ("adset_name", "ad_group_name")
@@ -152,22 +162,27 @@ class MarketingHandler(IngestionHandler):
         )
 
         payload: list[dict] = []
-        skipped = 0
         warnings: list[str] = []
 
-        dma_ids: set[int | None] = set()
-        region_ids: set[int | None] = set()
+        dma_ids: set[int] = set()
+        include_null_dma = False
+        region_ids: set[int] = set()
+        include_null_region = False
         date_ids: set[int] = set()
+        campaign_ids: set[int] = set()
+        adset_ids: set[int] = set()
+        ad_ids: set[int] = set()
         campaign_cache: dict[tuple[int, str, str], int] = {}
         adset_cache: dict[tuple[int, str, str], int] = {}
         ad_cache: dict[tuple[int, str, str], int] = {}
+
+        skipped_rows = 0
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
             raw_date = values.get(self.date_column, "") or ""
             parsed_date = parse_date(raw_date)
             if not parsed_date:
-                skipped += 1
                 warnings.append(
                     f"Row {index}: invalid date value '{raw_date}' — provide a parsable date"
                 )
@@ -179,6 +194,7 @@ class MarketingHandler(IngestionHandler):
                 )
                 if context.fail_fast:
                     raise ValueError("Encountered row without valid date")
+                skipped_rows += 1
                 continue
 
             date_id = await ensure_date_id(session, parsed_date)
@@ -201,7 +217,7 @@ class MarketingHandler(IngestionHandler):
                 context,
             )
             if campaign_id is None:
-                skipped += 1
+                skipped_rows += 1
                 continue
 
             adset_id = await self._resolve_adset_id(
@@ -215,7 +231,7 @@ class MarketingHandler(IngestionHandler):
                 context,
             )
             if adset_id is None:
-                skipped += 1
+                skipped_rows += 1
                 continue
 
             ad_id = await self._resolve_ad_id(
@@ -229,41 +245,63 @@ class MarketingHandler(IngestionHandler):
                 context,
             )
             if ad_id is None:
-                skipped += 1
+                skipped_rows += 1
                 continue
 
             dma_id = None
+            raw_dma = ""
+            dma_placeholder = False
             if self.dma_column:
                 raw_dma = values.get(self.dma_column, "") or ""
-                dma_id = resolver.resolve_mapping("dma_map", raw_dma)
-                if dma_id is not None:
-                    dma_id = self._coerce_int(dma_id, "dma_id")
-                elif raw_dma:
-                    dma_id = await ensure_dma_id(
-                        session,
-                        platform_id,
-                        label=raw_dma,
-                    )
-                    if dma_id is not None:
+                if raw_dma:
+                    if self._should_treat_dma_as_null(raw_dma):
+                        include_null_dma = True
+                        dma_placeholder = True
                         log_event(
-                            "ROW_DMA_AUTO_MAPPED",
+                            "ROW_DMA_TREATED_AS_NULL",
                             handler=self.__class__.__name__,
                             row_index=index,
                             raw_value=raw_dma,
-                            dma_id=dma_id,
                         )
-                if raw_dma and dma_id is None:
-                    warnings.append(
-                        f"Row {index}: unknown DMA '{raw_dma}' — add a column_map.dma_map entry or supply dma_map overrides"
-                    )
-                    log_event(
-                        "ROW_DMA_UNRESOLVED",
-                        handler=self.__class__.__name__,
-                        row_index=index,
-                        raw_value=raw_dma,
-                    )
-                    if context.fail_fast:
-                        raise ValueError(f"Unable to resolve DMA '{raw_dma}'")
+                    else:
+                        dma_id = resolver.resolve_mapping("dma_map", raw_dma)
+                        if dma_id is not None:
+                            dma_id = self._coerce_int(dma_id, "dma_id")
+                            log_event(
+                                "ROW_DMA_RESOLVED_MAPPING",
+                                handler=self.__class__.__name__,
+                                row_index=index,
+                                raw_value=raw_dma,
+                                dma_id=dma_id,
+                            )
+                        else:
+                            dma_id = await ensure_dma_id(
+                                session,
+                                platform_id,
+                                label=raw_dma,
+                            )
+                            if dma_id is not None:
+                                log_event(
+                                    "ROW_DMA_AUTO_MAPPED",
+                                    handler=self.__class__.__name__,
+                                    row_index=index,
+                                    raw_value=raw_dma,
+                                    dma_id=dma_id,
+                                )
+                        if dma_id is None:
+                            include_null_dma = True
+                            if not dma_placeholder:
+                                warnings.append(
+                                    f"Row {index}: unknown DMA '{raw_dma}' — add a column_map.dma_map entry or supply dma_map overrides"
+                                )
+                                log_event(
+                                    "ROW_DMA_UNRESOLVED",
+                                    handler=self.__class__.__name__,
+                                    row_index=index,
+                                    raw_value=raw_dma,
+                                )
+                                if context.fail_fast:
+                                    raise ValueError(f"Unable to resolve DMA '{raw_dma}'")
 
             region_id = None
             if self.region_column:
@@ -274,15 +312,14 @@ class MarketingHandler(IngestionHandler):
                         f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
                     )
                     log_event(
-                        "ROW_SKIPPED_UNKNOWN_REGION",
+                        "ROW_REGION_UNRESOLVED",
                         handler=self.__class__.__name__,
                         row_index=index,
                         raw_value=raw_region,
                     )
                     if context.fail_fast:
                         raise ValueError(f"Unable to resolve region '{raw_region}'")
-                    skipped += 1
-                    continue
+                    region_id = None
 
             metrics: dict[str, object] = {}
             for target_column, spec in self.metric_specs.items():
@@ -305,8 +342,17 @@ class MarketingHandler(IngestionHandler):
                 }
             )
             date_ids.add(date_id)
-            dma_ids.add(dma_id)
-            region_ids.add(region_id)
+            if dma_id is not None:
+                dma_ids.add(dma_id)
+            elif self.dma_column:
+                include_null_dma = True
+            if region_id is not None:
+                region_ids.add(region_id)
+            else:
+                include_null_region = include_null_region or bool(self.region_column)
+            campaign_ids.add(campaign_id)
+            adset_ids.add(adset_id)
+            ad_ids.add(ad_id)
             log_event(
                 "ROW_READY",
                 handler=self.__class__.__name__,
@@ -317,14 +363,14 @@ class MarketingHandler(IngestionHandler):
                 metrics=metrics,
             )
 
-        result.skipped = skipped
+        result.skipped = skipped_rows
         result.warnings.extend(warnings)
 
         log_event(
             "PAYLOAD_PREPARED",
             handler=self.__class__.__name__,
             rows_prepared=len(payload),
-            rows_skipped=skipped,
+            rows_skipped=skipped_rows,
             warnings_count=len(warnings),
             sample_row=payload[0] if payload else None,
         )
@@ -335,14 +381,14 @@ class MarketingHandler(IngestionHandler):
                 handler=self.__class__.__name__,
                 rows_considered=len(normalized.rows),
                 payload_rows=len(payload),
-                skipped=skipped,
+                skipped=skipped_rows,
                 warnings=warnings,
             )
             result.inserted = len(payload)
             if context.dry_run:
                 result.summary = (
                     f"Dry run prepared {len(payload)} marketing rows for fact_marketing_daily; "
-                    f"skipped {skipped}."
+                    f"skipped {skipped_rows}."
                 )
             else:
                 result.summary = (
@@ -350,33 +396,58 @@ class MarketingHandler(IngestionHandler):
                 )
             return result
 
-        delete_stmt = delete(FactMarketingDaily).where(
+        delete_conditions = [
             FactMarketingDaily.platform_id == platform_id,
             FactMarketingDaily.account_id == account_id,
-            FactMarketingDaily.campaign_id == campaign_id,
-            FactMarketingDaily.adset_id == adset_id,
-            FactMarketingDaily.ad_id == ad_id,
             FactMarketingDaily.date_id.in_(date_ids),
-        )
-        if self.dma_column:
-            delete_stmt = delete_stmt.where(FactMarketingDaily.dma_id.in_(dma_ids))
-        if self.region_column:
-            delete_stmt = delete_stmt.where(FactMarketingDaily.region_id.in_(region_ids))
+        ]
+        if campaign_ids:
+            delete_conditions.append(FactMarketingDaily.campaign_id.in_(campaign_ids))
+        if adset_ids:
+            delete_conditions.append(FactMarketingDaily.adset_id.in_(adset_ids))
+        if ad_ids:
+            delete_conditions.append(FactMarketingDaily.ad_id.in_(ad_ids))
+
+        delete_stmt = delete(FactMarketingDaily).where(*delete_conditions)
+        if self.dma_column and (dma_ids or include_null_dma):
+            dma_filters: list = []
+            if dma_ids:
+                dma_filters.append(FactMarketingDaily.dma_id.in_(dma_ids))
+            if include_null_dma:
+                dma_filters.append(FactMarketingDaily.dma_id.is_(None))
+            if dma_filters:
+                delete_stmt = delete_stmt.where(
+                    or_(*dma_filters) if len(dma_filters) > 1 else dma_filters[0]
+                )
+        if self.region_column and (region_ids or include_null_region):
+            region_filters: list = []
+            if region_ids:
+                region_filters.append(FactMarketingDaily.region_id.in_(region_ids))
+            if include_null_region:
+                region_filters.append(FactMarketingDaily.region_id.is_(None))
+            if region_filters:
+                delete_stmt = delete_stmt.where(
+                    or_(*region_filters) if len(region_filters) > 1 else region_filters[0]
+                )
 
         log_event(
             "DATABASE_WRITE_BEGIN",
             handler=self.__class__.__name__,
             payload_rows=len(payload),
             unique_dates=len(date_ids),
-            unique_dmas=len([item for item in dma_ids if item is not None]),
-            unique_regions=len([item for item in region_ids if item is not None]),
+            unique_dmas=len(dma_ids),
+            includes_null_dma=include_null_dma,
+            unique_regions=len(region_ids),
+            includes_null_region=include_null_region,
         )
         log_event(
             "DATABASE_DELETE_SCOPE",
             handler=self.__class__.__name__,
             date_ids=sorted(date_ids),
-            dma_ids=[item for item in dma_ids if item is not None],
-            region_ids=[item for item in region_ids if item is not None],
+            dma_ids=sorted(dma_ids),
+            include_null_dma=include_null_dma,
+            region_ids=sorted(region_ids),
+            include_null_region=include_null_region,
         )
         await session.execute(delete_stmt)
         if payload:
@@ -387,15 +458,23 @@ class MarketingHandler(IngestionHandler):
             "DATABASE_WRITE_COMPLETE",
             handler=self.__class__.__name__,
             inserted=len(payload),
-            skipped=skipped,
+            skipped=skipped_rows,
             warnings=warnings,
         )
 
         result.inserted = len(payload)
         result.summary = (
-            f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped}."
+            f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
         )
         return result
+
+    def _should_treat_dma_as_null(self, raw_value: str) -> bool:
+        normalized = " ".join(raw_value.strip().lower().split())
+        if not normalized:
+            return True
+        if normalized in self.dma_null_tokens:
+            return True
+        return normalized.startswith("unknown ")
 
     def _ensure_dimension_inputs(
         self,
