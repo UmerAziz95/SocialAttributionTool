@@ -3,14 +3,16 @@ from __future__ import annotations
 
 from pathlib import Path, PureWindowsPath
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.ingestion import (
     FileIngestionRequest,
     FileIngestionResponse,
-    FileUploadResponse,
+    IngestionPlatform,
+    MultiFileUploadResponse,
+    UploadedFileMetadata,
 )
 from app.services.ingestion.logging import get_ingestion_logger, log_event
 from app.services.ingestion.service import FileIngestionService
@@ -32,50 +34,75 @@ router = APIRouter(
 
 @router.post(
     "/upload",
-    response_model=FileUploadResponse,
-    summary="Upload a source file",
+    response_model=MultiFileUploadResponse,
+    summary="Upload one or more files for a platform",
     description=(
-        "Upload a raw marketing export. The API writes the file to the server "
-        "storage directory and returns the fully-qualified path so it can be "
-        "referenced in the ingestion request."
+        "Upload one or more raw marketing exports and specify which platform they "
+        "belong to (TikTok, Shopify, Meta, Pinterest, or Google). The API saves "
+        "each file under a platform-specific directory and returns metadata that "
+        "can be referenced when triggering ingestion."
     ),
-    response_description="Metadata for the uploaded file including its storage path.",
+    response_description="Metadata for each uploaded file grouped by platform.",
     status_code=201,
 )
+async def upload_files(
+    platform: IngestionPlatform = Form(
+        ...,
+        description="Platform name that determines the upload subdirectory",
+        examples=["tiktok", "shopify"],
+    ),
+    files: list[UploadFile] = File(
+        ..., description="One or more CSV/TSV exports to store on the server"
+    ),
+) -> MultiFileUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file must be provided")
 
-async def upload_file(file: UploadFile) -> FileUploadResponse:
-    log_event(
-        "UPLOAD_START",
-        filename=file.filename,
-        content_type=file.content_type,
-    )
-    storage_dir = Path("data/uploads")
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    destination = storage_dir / file.filename
+    platform_dir = Path("data/uploads") / platform.value
+    platform_dir.mkdir(parents=True, exist_ok=True)
 
-    size = 0
-    chunks = 0
-    with destination.open("wb") as buffer:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            buffer.write(chunk)
-            chunks += 1
-    log_event(
-        "UPLOAD_STREAM_COMPLETE",
-        filename=file.filename,
-        path=destination.resolve(),
-        chunks_written=chunks,
-        total_bytes=size,
-    )
+    saved_files: list[UploadedFileMetadata] = []
+    for upload in files:
+        log_event(
+            "UPLOAD_START",
+            platform=platform.value,
+            filename=upload.filename,
+            content_type=upload.content_type,
+        )
+        destination = platform_dir / upload.filename
+        size = 0
+        chunks = 0
+        with destination.open("wb") as buffer:
+            while chunk := await upload.read(1024 * 1024):
+                size += len(chunk)
+                buffer.write(chunk)
+                chunks += 1
 
-    resolved_path = destination.resolve()
-    log_event(
-        "UPLOAD_COMPLETE",
-        filename=file.filename,
-        path=resolved_path,
-        size_bytes=size,
-    )
-    return FileUploadResponse(saved_path=resolved_path, size_bytes=size)
+        resolved_path = destination.resolve()
+        log_event(
+            "UPLOAD_STREAM_COMPLETE",
+            platform=platform.value,
+            filename=upload.filename,
+            path=resolved_path,
+            chunks_written=chunks,
+            total_bytes=size,
+        )
+        log_event(
+            "UPLOAD_COMPLETE",
+            platform=platform.value,
+            filename=upload.filename,
+            path=resolved_path,
+            size_bytes=size,
+        )
+        saved_files.append(
+            UploadedFileMetadata(
+                filename=upload.filename,
+                saved_path=resolved_path,
+                size_bytes=size,
+            )
+        )
+
+    return MultiFileUploadResponse(platform=platform, files=saved_files)
 
 
 def _resolve_uploaded_path(provided: Path | str) -> Path:

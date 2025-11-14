@@ -6,7 +6,7 @@ This guide explains how to interact with the marketing ingestion endpoints that 
 
 The ingestion workflow is exposed through two endpoints under `/api/v1/files`:
 
-1. `POST /api/v1/files/upload` — Accepts a CSV/TSV export, stores it on disk, and returns the absolute path of the saved file.
+1. `POST /api/v1/files/upload` — Accepts one or more CSV/TSV exports plus a required `platform` value (TikTok, Shopify, Meta, Pinterest, or Google). Each file is stored inside `data/uploads/<platform>/`, and the response returns metadata for every saved file.
 2. `POST /api/v1/files/ingest/path` — Takes the path of an uploaded file, normalizes it, validates required columns, and ingests the data into staging/fact tables while logging the run in `event_ingestion_log`.
 
 Both endpoints are grouped under the **files** tag in the OpenAPI (Swagger) documentation to make them easy to find.
@@ -17,14 +17,27 @@ Both endpoints are grouped under the **files** tag in the OpenAPI (Swagger) docu
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/files/upload" \
-     -F "file=@/absolute/path/to/DMA_Performance_Meta.csv"
+     -F "platform=tiktok" \
+     -F "files=@/abs/path/to/tiktok_by_dma.csv" \
+     -F "files=@/abs/path/to/tiktok_by_region.csv"
 ```
 
 **Successful response**
 ```json
 {
-  "saved_path": "/app/data/uploads/DMA_Performance_Meta.csv",
-  "size_bytes": 12038
+  "platform": "tiktok",
+  "files": [
+    {
+      "filename": "tiktok_by_dma.csv",
+      "saved_path": "/app/data/uploads/tiktok/tiktok_by_dma.csv",
+      "size_bytes": 2314
+    },
+    {
+      "filename": "tiktok_by_region.csv",
+      "saved_path": "/app/data/uploads/tiktok/tiktok_by_region.csv",
+      "size_bytes": 5428
+    }
+  ]
 }
 ```
 
@@ -67,7 +80,7 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
 
 2. **Open Swagger UI** at [http://localhost:8000/docs](http://localhost:8000/docs). Look for the **files** tag, which contains the upload and ingest operations. Use the built-in forms to execute the requests directly from the browser if preferred.
 
-3. **Upload a sample file** using the Swagger UI or the cURL command shown earlier. Confirm that the response includes an absolute path under the server's `data/uploads/` directory.
+3. **Upload the files for a platform** using the Swagger UI or the cURL command shown earlier. Confirm that each response entry includes an absolute path under the server's `data/uploads/<platform>/` directory.
 
 4. **Kick off ingestion** by calling the ingest endpoint with the `file_path` returned in step 3. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
 
@@ -87,7 +100,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 - Platforms are also created on demand when the specified `column_map.platform_id` is missing; include `platform_name` or `platform_label` in the column map to set the `dim_platform.name` value.
 - To run a dry validation without writing to the database, set `"dry_run": true` in the ingestion request.
 - Use `"fail_fast": true` to stop processing on the first validation error; otherwise, warnings are collected and returned in the response.
-- Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `STAGE_START`, `HEADER_NORMALIZED`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run.
+- Every upload and ingestion call writes structured entries to `data/logs/ingestion.log`. Each line begins with an event label (for example, `UPLOAD_START`, `STAGE_START`, `HEADER_NORMALIZED`, `ROW_READY`, `DATABASE_WRITE_COMPLETE`) followed by key/value details so you can trace the exact step, inputs, and outcomes for the run. When uploading multiple files, the log will include individual `UPLOAD_*` events for each filename together with the `platform` that owns the directory.
 
 ## Log Event Reference
 

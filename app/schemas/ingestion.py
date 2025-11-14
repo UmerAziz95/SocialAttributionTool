@@ -1,23 +1,65 @@
 """Pydantic models used by the ingestion API."""
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class FileUploadResponse(BaseModel):
-    """Response returned after a successful file upload."""
+class IngestionPlatform(str, Enum):
+    """Supported marketing platforms for grouped uploads."""
 
+    TIKTOK = "tiktok"
+    SHOPIFY = "shopify"
+    META = "meta"
+    PINTEREST = "pinterest"
+    GOOGLE = "google"
+
+
+class UploadedFileMetadata(BaseModel):
+    """Metadata captured for each uploaded file."""
+
+    filename: str = Field(..., description="Original filename supplied by the client")
     saved_path: Path = Field(..., description="Absolute path to the stored file")
     size_bytes: int = Field(..., ge=0, description="Total bytes persisted to disk")
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "saved_path": "/app/data/uploads/DMA_Performance_Meta.csv",
+                "filename": "DMA_Performance_Meta.csv",
+                "saved_path": "/app/data/uploads/meta/DMA_Performance_Meta.csv",
                 "size_bytes": 12038,
+            }
+        }
+    }
+
+
+class MultiFileUploadResponse(BaseModel):
+    """Response returned after uploading one or more files for a platform."""
+
+    platform: IngestionPlatform = Field(..., description="Platform folder the files were stored under")
+    files: list[UploadedFileMetadata] = Field(
+        ..., description="Metadata for each uploaded file in the request"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "platform": "tiktok",
+                "files": [
+                    {
+                        "filename": "tiktok_by_dma.csv",
+                        "saved_path": "/app/data/uploads/tiktok/tiktok_by_dma.csv",
+                        "size_bytes": 2314,
+                    },
+                    {
+                        "filename": "tiktok_by_region.csv",
+                        "saved_path": "/app/data/uploads/tiktok/tiktok_by_region.csv",
+                        "size_bytes": 5428,
+                    },
+                ],
             }
         }
     }
