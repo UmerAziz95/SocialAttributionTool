@@ -42,6 +42,7 @@ router = APIRouter(
     response_description="Metadata for the uploaded file including its storage path.",
     status_code=201,
 )
+
 async def upload_file(file: UploadFile) -> FileUploadResponse:
     log_event(
         "UPLOAD_START",
@@ -157,6 +158,8 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
     ),
     response_description="Result of the ingestion run, including counts and warnings.",
 )
+
+
 async def ingest_file_by_path(
     payload: FileIngestionRequest,
     session: AsyncSession = Depends(get_db),
@@ -185,6 +188,7 @@ async def ingest_file_by_path(
         batch_size=context.batch_size,
         column_map=context.column_map,
     )
+    
     result = await service.ingest(session, context)
     return FileIngestionResponse(
         inserted=result.inserted,
