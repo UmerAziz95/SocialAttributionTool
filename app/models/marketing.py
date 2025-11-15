@@ -251,7 +251,7 @@ class StgShopifyDailyCity(Base):
             "city_name_norm",
             name="stg_shopify_daily_city_pk",
         ),
-    )
+    )         
 
 
 class MapCityDMA(Base):
@@ -269,7 +269,7 @@ class MapCityDMA(Base):
     )
     dma_share: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False, server_default=text("1.00000"))
 
-    __table_args__ = (
+    __table_args__ = (      
         PrimaryKeyConstraint(
             "country_id",
             "region_id",
