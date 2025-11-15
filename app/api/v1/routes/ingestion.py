@@ -105,7 +105,9 @@ async def upload_files(
     return MultiFileUploadResponse(platform=platform, files=saved_files)
 
 
-def _resolve_uploaded_path(provided: Path | str) -> Path:
+def _resolve_uploaded_path(
+    provided: Path | str, platform: IngestionPlatform | None = None
+) -> Path:
     """Locate an uploaded file based on the provided path or filename.
 
     The upload endpoint returns an absolute path, but users may also supply just the
@@ -118,6 +120,7 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
     if not raw_value:
         raise HTTPException(status_code=400, detail="file_path must be provided")
     storage_dir = Path("data/uploads").resolve()
+    platform_dir = storage_dir / platform.value if platform else None
     normalized = raw_value.replace("\\", "/")
 
     candidates: list[Path] = []
@@ -144,10 +147,26 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
         suffix = normalized.split(marker, 1)[1]
         add_candidate(storage_dir / suffix)
 
+    # 4. If a platform is provided and the path is relative, scope the lookup to
+    #    the corresponding subdirectory.
+    if platform_dir and not Path(raw_value).is_absolute():
+        add_candidate(platform_dir / raw_value)
+
     # 4. Finally, fall back to matching on the filename only.
     filename = Path(normalized).name
     if filename:
-        add_candidate(storage_dir / filename)
+        if platform_dir:
+            add_candidate(platform_dir / filename)
+        else:
+            add_candidate(storage_dir / filename)
+        # Search all platform subdirectories for a matching filename.
+        try:
+            for subdir in storage_dir.iterdir():
+                if not subdir.is_dir():
+                    continue
+                add_candidate(subdir / filename)
+        except FileNotFoundError:
+            pass
 
     for candidate in candidates:
         try:
@@ -180,18 +199,16 @@ def _resolve_uploaded_path(provided: Path | str) -> Path:
     summary="Ingest a previously uploaded file",
     description=(
         "Trigger normalization and database ingestion for a file saved on the "
-        "server. Provide optional overrides such as currency code, attribution "
-        "window, or dimension IDs."
+        "server. Provide optional overrides such as platform hint, currency "
+        "code, attribution window, or dimension IDs."
     ),
     response_description="Result of the ingestion run, including counts and warnings.",
 )
-
-
 async def ingest_file_by_path(
     payload: FileIngestionRequest,
     session: AsyncSession = Depends(get_db),
 ) -> FileIngestionResponse:
-    file_path = _resolve_uploaded_path(payload.file_path)
+    file_path = _resolve_uploaded_path(payload.file_path, payload.platform)
 
     context = IngestionContext(
         file_path=file_path,
@@ -215,7 +232,6 @@ async def ingest_file_by_path(
         batch_size=context.batch_size,
         column_map=context.column_map,
     )
-    
     result = await service.ingest(session, context)
     return FileIngestionResponse(
         inserted=result.inserted,

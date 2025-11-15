@@ -69,6 +69,13 @@ class FileIngestionRequest(BaseModel):
     """Payload describing how to ingest a stored marketing file."""
 
     file_path: Path = Field(..., description="Path to the uploaded file")
+    platform: IngestionPlatform | None = Field(
+        default=None,
+        description=(
+            "Optional platform hint. When provided, the server searches the "
+            "matching subdirectory under data/uploads for the file."
+        ),
+    )
     column_map: dict[str, Any] | None = Field(
         default=None,
         description="Dimension or field overrides",
@@ -101,7 +108,8 @@ class FileIngestionRequest(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "file_path": "/app/data/uploads/DMA_Performance_Meta.csv",
+                "file_path": "DMA_Performance_Meta.csv",
+                "platform": "meta",
                 "column_map": {"platform_id": 1, "account_id": 10},
                 "currency_code": "AUD",
                 "attribution": "Incremental",

@@ -7,7 +7,7 @@ This guide explains how to interact with the marketing ingestion endpoints that 
 The ingestion workflow is exposed through two endpoints under `/api/v1/files`:
 
 1. `POST /api/v1/files/upload` — Accepts one or more CSV/TSV exports plus a required `platform` value (TikTok, Shopify, Meta, Pinterest, or Google). Each file is stored inside `data/uploads/<platform>/`, and the response returns metadata for every saved file.
-2. `POST /api/v1/files/ingest/path` — Takes the path of an uploaded file, normalizes it, validates required columns, and ingests the data into staging/fact tables while logging the run in `event_ingestion_log`.
+2. `POST /api/v1/files/ingest/path` — Takes the path (or just the filename) of an uploaded file plus an optional `platform` hint, normalizes it, validates required columns, and ingests the data into staging/fact tables while logging the run in `event_ingestion_log`.
 
 Both endpoints are grouped under the **files** tag in the OpenAPI (Swagger) documentation to make them easy to find.
 
@@ -47,7 +47,8 @@ curl -X POST "http://localhost:8000/api/v1/files/upload" \
 curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
      -H "Content-Type: application/json" \
      -d '{
-           "file_path": "/app/data/uploads/DMA_Performance_Meta.csv",
+           "file_path": "tiktok_by_dma.csv",
+           "platform": "tiktok",
            "column_map": {"platform_id": 1, "account_id": 42},
            "currency_code": "AUD",
            "attribution": "Incremental",
@@ -67,7 +68,7 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
   "status": "ingested",
   "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
   "duration_sec": 4.21,
-  "normalized_path": "/app/data/uploads/DMA_Performance_Meta__normalized.csv"
+  "normalized_path": "/app/data/uploads/tiktok/tiktok_by_dma__normalized.csv"
 }
 ```
 
@@ -82,7 +83,7 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/path" \
 
 3. **Upload the files for a platform** using the Swagger UI or the cURL command shown earlier. Confirm that each response entry includes an absolute path under the server's `data/uploads/<platform>/` directory.
 
-4. **Kick off ingestion** by calling the ingest endpoint with the `file_path` returned in step 3. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
+4. **Kick off ingestion** by calling the ingest endpoint with either the absolute `file_path` returned in step 3 or just the filename plus the `platform` you uploaded under. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
 
 5. **Review the response** to confirm the counts and warnings look correct. The `status` field explains whether rows were ingested, skipped (no data), or if you ran a dry run, while `summary` reiterates the inserted/updated/skipped totals. A `normalized_path` ending with `__normalized.csv` should be returned, indicating the normalization step succeeded.
 
@@ -92,7 +93,7 @@ Following this sequence ensures the full upload → normalize → ingest → log
 
 ## Additional Notes
 
-- The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization.
+- The ingestion service automatically detects delimiter and encoding, drops empty rows, and preserves all columns during normalization. The normalized copy is written back to the same platform directory as the original file using the `__normalized.csv` suffix so you always have a side-by-side artifact.
 - Campaign/ad set/ad identifiers are resolved automatically using the names and IDs present in each row. Missing dimensions are created on the fly and reused for subsequent records, but you can override the behaviour with `column_map` keys such as `campaign_id`, `campaign_map`, `adset_map`, or `ad_map`.
 - DMA labels are resolved automatically. The service first looks for an explicit `column_map.dma_map` override, then for an existing `map_platform_dma` row, and finally creates the `dim_dma` + `map_platform_dma` records when a new label is encountered. Vendor suffixes such as `,DMA®`, `DMA`, or `DMA Region` are stripped automatically before the lookup so that `Syracuse,DMA®` and `Syracuse DMA` collapse onto the same dimension key. Common placeholder values such as `Unknown`, `Not Reported`, or `N/A` are treated as unspecified and logged via `ROW_DMA_TREATED_AS_NULL` so the fact row is written with a `NULL` `dma_id`. If a non-placeholder label still cannot be mapped after those checks, the row is ingested with a warning (`ROW_DMA_UNRESOLVED`) so you can backfill a mapping later without losing the metric values.
 - Region columns behave similarly: unresolved entries generate a `ROW_REGION_UNRESOLVED` event, keep the row in the payload with a `NULL` `region_id`, and emit a warning so you can add `column_map.region_map` hints without re-running normalization.
