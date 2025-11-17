@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
     # Versioned API
     app.include_router(api_router, prefix="/api/v1")
 
-    # Health checks
+    # Health checks 
     @app.get("/health/live")
     def live():
         return {"status": "ok"}
@@ -49,3 +49,4 @@ def create_app() -> FastAPI:
     return app
 
 app = create_app()
+
