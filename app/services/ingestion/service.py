@@ -14,7 +14,11 @@ from app.models.marketing import EventIngestionLog
 from app.services.ingestion.handlers import HANDLERS
 from app.services.ingestion.logging import get_ingestion_logger, log_event
 from app.services.ingestion.types import IngestionContext, IngestionResult
-from app.services.ingestion.utils import NormalizationResult, normalize_file
+from app.services.ingestion.utils import (
+    NormalizationResult,
+    load_normalized_artifact,
+    normalize_file,
+)
 
 
 class FileIngestionService:
@@ -60,17 +64,31 @@ class FileIngestionService:
             file=context.file_path,
         )
         log_event("NORMALIZATION_BEGIN", file=context.file_path)
-        normalized: NormalizationResult = normalize_file(context.file_path)
-        context.normalized_path = normalized.path
-        log_event(
-            "NORMALIZATION_COMPLETE",
-            source=context.file_path,
-            normalized=normalized.path,
-            encoding=normalized.encoding,
-            delimiter=normalized.delimiter,
-            row_count=len(normalized.rows),
-            headers=normalized.headers,
-        )
+        if context.use_existing_normalized:
+            if not context.normalized_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="normalized_path must be provided when reusing normalized files",
+                )
+            normalized = load_normalized_artifact(context.normalized_path)
+            log_event(
+                "NORMALIZATION_REUSED",
+                source=context.normalized_path,
+                row_count=len(normalized.rows),
+                headers=normalized.headers,
+            )
+        else:
+            normalized = normalize_file(context.file_path)
+            context.normalized_path = normalized.path
+            log_event(
+                "NORMALIZATION_COMPLETE",
+                source=context.file_path,
+                normalized=normalized.path,
+                encoding=normalized.encoding,
+                delimiter=normalized.delimiter,
+                row_count=len(normalized.rows),
+                headers=normalized.headers,
+            )
         log_event(
             "STAGE_COMPLETE",
             stage="normalization",
