@@ -30,7 +30,7 @@ class UserService:
         hashed_password = get_password_hash(password)
         user = await self._repo.create(email=email, hashed_password=hashed_password)
         await self._session.commit()
-        return user
+        return user  
 
     async def get_by_id(self, user_id: int) -> User:
         user = await self._repo.get_by_id(user_id)
