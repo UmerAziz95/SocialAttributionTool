@@ -158,3 +158,47 @@ def normalize_file(path: Path) -> NormalizationResult:
         encoding=encoding,
         delimiter=delimiter,
     )
+
+
+def load_normalized_artifact(path: Path) -> NormalizationResult:
+    """Load an existing normalized CSV into a NormalizationResult."""
+
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Normalized file '{path}' does not exist",
+        )
+
+    with path.open("r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        headers = reader.fieldnames
+        if not headers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Normalized file '{path.name}' does not contain headers",
+            )
+        rows = [
+            NormalizedRow({key: (value or "") for key, value in (row or {}).items()})
+            for row in reader
+        ]
+
+    log_event(
+        "NORMALIZED_FILE_LOADED",
+        source=path,
+        row_count=len(rows),
+        header_count=len(headers),
+    )
+
+    return NormalizationResult(
+        path=path,
+        headers=list(headers),
+        rows=rows,
+        encoding="utf-8",
+        delimiter=",",
+    )
+
+
+def is_normalized_filename(path: Path) -> bool:
+    """Return True when the filename already contains the __normalized suffix."""
+
+    return path.name.endswith("__normalized.csv")
