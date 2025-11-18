@@ -1,5 +1,4 @@
 """Pydantic models used by the ingestion API."""
-from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
@@ -209,6 +208,60 @@ class SingleFileIngestionRequest(BaseModel):
             }
         }
     }
+    }
+
+
+class SingleFileIngestionRequest(BaseModel):
+    """Request payload for ingesting a specific normalized file."""
+
+    platform: IngestionPlatform = Field(
+        ..., description="Platform folder the normalized file belongs to"
+    )
+    filename: str = Field(
+        ..., description="Filename (normalized or source) to ingest"
+    )
+    column_map: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Dimension or field overrides",
+        examples=[{"platform_id": 1, "account_id": 10}],
+    )
+    currency_code: Optional[str] = Field(
+        default=None,
+        description="Currency code override",
+        examples=["AUD"],
+    )
+    attribution: Optional[str] = Field(
+        default=None,
+        description="Attribution window override",
+        examples=["Incremental"],
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="If true, run validation without writing to the database",
+    )
+    fail_fast: bool = Field(
+        default=False,
+        description="If true, abort on the first validation error",
+    )
+    batch_size: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional batch size for DB writes",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "platform": "tiktok",
+                "filename": "tiktok_by_dma__normalized.csv",
+                "column_map": {"platform_id": 1, "account_id": 10},
+                "currency_code": "AUD",
+                "attribution": "Incremental",
+                "dry_run": False,
+                "fail_fast": False,
+                "batch_size": 500,
+            }
+        }
     }
 
 
