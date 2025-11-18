@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -40,7 +40,7 @@ class MultiFileUploadResponse(BaseModel):
     """Response returned after uploading one or more files for a platform."""
 
     platform: IngestionPlatform = Field(..., description="Platform folder the files were stored under")
-    files: list[UploadedFileMetadata] = Field(
+    files: List[UploadedFileMetadata] = Field(
         ..., description="Metadata for each uploaded file in the request"
     )
 
@@ -71,7 +71,7 @@ class FileIngestionRequest(BaseModel):
     platform: IngestionPlatform = Field(
         ..., description="Platform folder whose files should be ingested"
     )
-    filenames: list[str] | None = Field(
+    filenames: Optional[List[str]] = Field(
         default=None,
         description=(
             "Optional subset of filenames to ingest. When omitted, every file in "
@@ -79,17 +79,17 @@ class FileIngestionRequest(BaseModel):
         ),
         examples=[["DMA_Performance_Meta.csv", "Region_Performance_Meta.csv"]],
     )
-    column_map: dict[str, Any] | None = Field(
+    column_map: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Dimension or field overrides",
         examples=[{"platform_id": 1, "account_id": 10}],
     )
-    currency_code: str | None = Field(
+    currency_code: Optional[str] = Field(
         default=None,
         description="Currency code override",
         examples=["AUD"],
     )
-    attribution: str | None = Field(
+    attribution: Optional[str] = Field(
         default=None,
         description="Attribution window override",
         examples=["Incremental"],
@@ -102,7 +102,7 @@ class FileIngestionRequest(BaseModel):
         default=False,
         description="If true, abort on the first validation error",
     )
-    batch_size: int | None = Field(
+    batch_size: Optional[int] = Field(
         default=None,
         ge=1,
         description="Optional batch size for DB writes",
@@ -132,7 +132,7 @@ class FileIngestionResponse(BaseModel):
     inserted: int = Field(..., ge=0, description="Number of new records written")
     updated: int = Field(..., ge=0, description="Number of existing rows updated")
     skipped: int = Field(..., ge=0, description="Rows skipped after validation errors")
-    warnings: list[str] = Field(default_factory=list, description="Non-fatal warnings")
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings")
     status: str = Field(..., description="Overall ingestion status (ingested, dry_run, no_data, failed)")
     summary: str = Field(..., description="Human-readable description of what happened during ingestion")
     duration_sec: float = Field(..., ge=0, description="Total execution time in seconds")
@@ -212,11 +212,65 @@ class SingleFileIngestionRequest(BaseModel):
     }
 
 
+class SingleFileIngestionRequest(BaseModel):
+    """Request payload for ingesting a specific normalized file."""
+
+    platform: IngestionPlatform = Field(
+        ..., description="Platform folder the normalized file belongs to"
+    )
+    filename: str = Field(
+        ..., description="Filename (normalized or source) to ingest"
+    )
+    column_map: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Dimension or field overrides",
+        examples=[{"platform_id": 1, "account_id": 10}],
+    )
+    currency_code: Optional[str] = Field(
+        default=None,
+        description="Currency code override",
+        examples=["AUD"],
+    )
+    attribution: Optional[str] = Field(
+        default=None,
+        description="Attribution window override",
+        examples=["Incremental"],
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="If true, run validation without writing to the database",
+    )
+    fail_fast: bool = Field(
+        default=False,
+        description="If true, abort on the first validation error",
+    )
+    batch_size: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional batch size for DB writes",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "platform": "tiktok",
+                "filename": "tiktok_by_dma__normalized.csv",
+                "column_map": {"platform_id": 1, "account_id": 10},
+                "currency_code": "AUD",
+                "attribution": "Incremental",
+                "dry_run": False,
+                "fail_fast": False,
+                "batch_size": 500,
+            }
+        }
+    }
+
+
 class PlatformIngestionResponse(BaseModel):
     """Aggregated response for platform-level ingestion."""
 
     platform: IngestionPlatform = Field(..., description="Platform that was processed")
-    results: list[FileIngestionResponse] = Field(
+    results: List[FileIngestionResponse] = Field(
         ..., description="Per-file ingestion outcomes for the platform"
     )
 
@@ -246,7 +300,7 @@ class PlatformIngestionResponse(BaseModel):
 class NormalizationRequest(BaseModel):
     """Options controlling the bulk normalization sweep."""
 
-    platforms: list[IngestionPlatform] | None = Field(
+    platforms: Optional[List[IngestionPlatform]] = Field(
         default=None,
         description="Platforms to normalize. Defaults to every supported platform.",
         examples=[["tiktok", "shopify"]],
@@ -267,20 +321,20 @@ class NormalizedFileResult(BaseModel):
     platform: IngestionPlatform = Field(..., description="Platform that owns the file")
     filename: str = Field(..., description="Original filename that was normalized")
     source_path: Path = Field(..., description="Path to the uploaded source file")
-    normalized_path: Path | None = Field(
+    normalized_path: Optional[Path] = Field(
         default=None,
         description="Location of the normalized CSV copy, when successful",
     )
-    row_count: int | None = Field(
+    row_count: Optional[int] = Field(
         default=None, description="Number of rows present in the normalized file"
     )
-    header_count: int | None = Field(
+    header_count: Optional[int] = Field(
         default=None, description="Number of headers detected during normalization"
     )
-    encoding: str | None = Field(
+    encoding: Optional[str] = Field(
         default=None, description="Detected encoding for the source file"
     )
-    delimiter: str | None = Field(
+    delimiter: Optional[str] = Field(
         default=None, description="Detected delimiter for the source file"
     )
     status: str = Field(
@@ -309,7 +363,7 @@ class NormalizedFileResult(BaseModel):
 class NormalizationResponse(BaseModel):
     """Aggregated response when normalizing uploaded files."""
 
-    results: list[NormalizedFileResult] = Field(
+    results: List[NormalizedFileResult] = Field(
         ..., description="Per-file normalization metadata"
     )
 
