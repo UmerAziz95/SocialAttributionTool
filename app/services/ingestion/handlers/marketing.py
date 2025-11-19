@@ -838,6 +838,11 @@ class TikTokRegionHandler(MarketingHandler):
     required_columns = ("subregion", "by_day", "cost")
     date_column = "by_day"
     region_column = "subregion"
+    # Region extracts do not expose ad group or ad level identifiers.  Treat the
+    # subregion label as the ad set/ad surrogate so the handler can still create
+    # dimension rows (scoped to the campaign) and persist fact records.
+    adset_name_fields = ("subregion", "campaign_name")
+    ad_name_fields = ("subregion", "campaign_name")
     metric_specs = {
         "spend": MetricSpec("cost", parse_decimal),
         "impressions": MetricSpec("impressions", parse_int),

@@ -75,7 +75,8 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/platform" \
       "status": "ingested",
       "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
       "duration_sec": 4.21,
-      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_dma__normalized.csv"
+      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_dma__normalized.csv",
+      "log_path": "/app/data/logs/ingestion.log"
     },
     {
       "filename": "tiktok_by_region.csv",
@@ -87,7 +88,8 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/platform" \
       "status": "ingested",
       "summary": "Inserted records into the warehouse. Inserted=75, Updated=0, Skipped=2.",
       "duration_sec": 2.10,
-      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_region__normalized.csv"
+      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_region__normalized.csv",
+      "log_path": "/app/data/logs/ingestion.log"
     }
   ]
 }
@@ -157,7 +159,7 @@ curl -X POST "http://localhost:8000/api/v1/files/normalize" \\
 
 5. **Kick off ingestion** by calling the platform ingest endpoint with the `platform` you uploaded under. Optionally include a `filenames` array to limit the run to specific files; if omitted, the API iterates over every non-normalized file in that platform folder. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
 
-6. **Review the response** to confirm the per-file counts and warnings look correct. Each entry explains whether rows were ingested, skipped (no data), or part of a dry run, while `summary` reiterates the inserted/updated/skipped totals. Every entry also reports the `normalized_path` ending with `__normalized.csv`, indicating the normalization step succeeded.
+6. **Review the response** to confirm the per-file counts and warnings look correct. Each entry explains whether rows were ingested, skipped (no data), or part of a dry run, while `summary` reiterates the inserted/updated/skipped totals. Every entry also reports the `normalized_path` ending with `__normalized.csv`, indicating the normalization step succeeded, and `log_path`, which points to `data/logs/ingestion.log` so you can inspect the verbatim pipeline trace for that run.
 
 7. **Verify the event log** by querying the `event_ingestion_log` table. The API writes a record for every ingestion run, including failures, so you can audit the outcomes.
 
