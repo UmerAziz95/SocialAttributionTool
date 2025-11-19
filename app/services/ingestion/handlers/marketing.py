@@ -62,6 +62,20 @@ class MarketingHandler(IngestionHandler):
     require_adset_inputs: bool = True
     require_ad_inputs: bool = True
 
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        """Hook for subclasses that need to synthesize ad set names."""
+
+        return None
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        """Hook for subclasses that need to synthesize ad names."""
+
+        return None
+
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         lowered = file_path.lower()
         return any(pattern in lowered for pattern in self.file_patterns)
@@ -388,6 +402,15 @@ class MarketingHandler(IngestionHandler):
         )
 
         if context.dry_run or not payload:
+            if not payload and not context.dry_run:
+                log_event(
+                    "MARKETING_NO_ROWS",
+                    handler=self.__class__.__name__,
+                    file=context.file_path,
+                    rows_considered=len(normalized.rows),
+                    warnings_count=len(warnings),
+                    warnings_sample=warnings[:5],
+                )
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
                 handler=self.__class__.__name__,
@@ -668,23 +691,38 @@ class MarketingHandler(IngestionHandler):
 
         adset_name = self._first_non_empty(values, self.adset_name_fields)
         adset_external_id = self._first_non_empty(values, self.adset_external_id_fields)
-        cache_key = (campaign_id, self._normalized_key(adset_external_id), self._normalized_key(adset_name))
+        cache_key = (
+            campaign_id,
+            self._normalized_key(adset_external_id),
+            self._normalized_key(adset_name),
+        )
 
         if cache_key[1] == "" and cache_key[2] == "":
-            warning = (
-                f"Row {row_index}: unable to determine ad set/ad group — provide column_map.adset_map "
-                "or ensure ad set columns exist."
-            )
-            warnings.append(warning)
-            log_event(
-                "ROW_SKIPPED_ADSET_UNRESOLVED",
-                handler=self.__class__.__name__,
-                row_index=row_index,
-                raw=values,
-            )
-            if context.fail_fast:
-                raise ValueError("Unable to resolve ad set for row")
-            return None
+            surrogate_name = self._fallback_adset_name(values, row_index)
+            if surrogate_name:
+                adset_name = surrogate_name
+                cache_key = (campaign_id, "", self._normalized_key(adset_name))
+                log_event(
+                    "ROW_ADSET_SURROGATE_ASSIGNED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    surrogate_name=surrogate_name,
+                )
+            else:
+                warning = (
+                    f"Row {row_index}: unable to determine ad set/ad group — provide column_map.adset_map "
+                    "or ensure ad set columns exist."
+                )
+                warnings.append(warning)
+                log_event(
+                    "ROW_SKIPPED_ADSET_UNRESOLVED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    raw=values,
+                )
+                if context.fail_fast:
+                    raise ValueError("Unable to resolve ad set for row")
+                return None
 
         if cache_key in cache:
             return cache[cache_key]
@@ -742,22 +780,37 @@ class MarketingHandler(IngestionHandler):
 
         ad_name = self._first_non_empty(values, self.ad_name_fields)
         ad_external_id = self._first_non_empty(values, self.ad_external_id_fields)
-        cache_key = (adset_id, self._normalized_key(ad_external_id), self._normalized_key(ad_name))
+        cache_key = (
+            adset_id,
+            self._normalized_key(ad_external_id),
+            self._normalized_key(ad_name),
+        )
 
         if cache_key[1] == "" and cache_key[2] == "":
-            warning = (
-                f"Row {row_index}: unable to determine ad — provide column_map.ad_map or ensure ad columns exist."
-            )
-            warnings.append(warning)
-            log_event(
-                "ROW_SKIPPED_AD_UNRESOLVED",
-                handler=self.__class__.__name__,
-                row_index=row_index,
-                raw=values,
-            )
-            if context.fail_fast:
-                raise ValueError("Unable to resolve ad for row")
-            return None
+            surrogate_name = self._fallback_ad_name(values, row_index, ad_name)
+            if surrogate_name:
+                ad_name = surrogate_name
+                cache_key = (adset_id, "", self._normalized_key(ad_name))
+                log_event(
+                    "ROW_AD_SURROGATE_ASSIGNED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    surrogate_name=surrogate_name,
+                )
+            else:
+                warning = (
+                    f"Row {row_index}: unable to determine ad — provide column_map.ad_map or ensure ad columns exist."
+                )
+                warnings.append(warning)
+                log_event(
+                    "ROW_SKIPPED_AD_UNRESOLVED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    raw=values,
+                )
+                if context.fail_fast:
+                    raise ValueError("Unable to resolve ad for row")
+                return None
 
         if cache_key in cache:
             return cache[cache_key]
@@ -860,7 +913,6 @@ class TikTokDMAHandler(MarketingHandler):
         "frequency": MetricSpec("frequency", parse_decimal),
     }
 
-
 class TikTokRegionHandler(MarketingHandler):
     file_patterns = ("tiktok_by_region",)
     required_columns = ("subregion", "by_day", "cost")
@@ -880,6 +932,23 @@ class TikTokRegionHandler(MarketingHandler):
         "conversions": MetricSpec("conversions", parse_int),
         "frequency": MetricSpec("frequency", parse_decimal),
     }
+
+    def _region_surrogate(self, values: dict[str, str], row_index: int) -> str:
+        for field in ("subregion", "campaign_name"):
+            candidate = (values.get(field, "") or "").strip()
+            if candidate:
+                return candidate
+        return f"region_row_{row_index}"
+
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        return self._region_surrogate(values, row_index)
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        return adset_name or self._region_surrogate(values, row_index)
 
 
 class TikTokAdsHandler(MarketingHandler):
