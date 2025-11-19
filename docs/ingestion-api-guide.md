@@ -4,11 +4,12 @@ This guide explains how to interact with the marketing ingestion endpoints that 
 
 ## Overview
 
-The ingestion workflow is exposed through three endpoints under `/api/v1/files`:
+The ingestion workflow is exposed through four endpoints under `/api/v1/files`:
 
 1. `POST /api/v1/files/upload` — Accepts one or more CSV/TSV exports plus a required `platform` value (TikTok, Shopify, Meta, Pinterest, or Google). Each file is stored inside `data/uploads/<platform>/`, and the response returns metadata for every saved file.
 2. `POST /api/v1/files/normalize` — Walks every platform upload folder (or a requested subset) and normalizes each source file in place. The normalized copy is written beside the original using the `__normalized.csv` suffix, and the response lists the detected encoding, delimiter, header count, and row count per file.
-3. `POST /api/v1/files/ingest/platform` — Takes the platform name (and an optional subset of filenames) and automatically normalizes, validates, and ingests **every** file sitting inside that platform's upload folder. Normalized copies are written back next to each original using the `__normalized.csv` suffix, and every handler run is logged to `event_ingestion_log`.
+3. `POST /api/v1/files/ingest/file` — Ingests a **single** normalized artifact for the requested platform. Provide the platform and filename (either the original or `__normalized` version) and the API reuses the normalized copy instead of creating a new one.
+4. `POST /api/v1/files/ingest/platform` — Takes the platform name (and an optional subset of filenames) and automatically normalizes, validates, and ingests **every** file sitting inside that platform's upload folder. Normalized copies are written back next to each original using the `__normalized.csv` suffix, and every handler run is logged to `event_ingestion_log`.
 
 Both endpoints are grouped under the **files** tag in the OpenAPI (Swagger) documentation to make them easy to find.
 
@@ -74,7 +75,8 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/platform" \
       "status": "ingested",
       "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
       "duration_sec": 4.21,
-      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_dma__normalized.csv"
+      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_dma__normalized.csv",
+      "log_path": "/app/data/logs/ingestion.log"
     },
     {
       "filename": "tiktok_by_region.csv",
@@ -86,13 +88,33 @@ curl -X POST "http://localhost:8000/api/v1/files/ingest/platform" \
       "status": "ingested",
       "summary": "Inserted records into the warehouse. Inserted=75, Updated=0, Skipped=2.",
       "duration_sec": 2.10,
-      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_region__normalized.csv"
+      "normalized_path": "/app/data/uploads/tiktok/tiktok_by_region__normalized.csv",
+      "log_path": "/app/data/logs/ingestion.log"
     }
   ]
 }
 ```
 
-### 3. Normalize uploaded files (optional pre-check)
+### 3. Ingest a single normalized file
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/files/ingest/file" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "platform": "tiktok",
+           "filename": "tiktok_by_dma__normalized.csv",
+           "column_map": {"platform_id": 1, "account_id": 42},
+           "currency_code": "AUD",
+           "attribution": "Incremental",
+           "dry_run": false,
+           "fail_fast": false,
+           "batch_size": 500
+         }'
+```
+
+This request reuses the normalized copy created earlier (either via the normalization sweep or a previous ingestion run) and skips the normalization stage entirely. Provide the normalized filename or the original name—the API automatically resolves the `__normalized.csv` artifact beside it. The response mirrors the per-file payload returned by the platform endpoint.
+
+### 4. Normalize uploaded files (optional pre-check)
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/files/normalize" \\
@@ -137,7 +159,7 @@ curl -X POST "http://localhost:8000/api/v1/files/normalize" \\
 
 5. **Kick off ingestion** by calling the platform ingest endpoint with the `platform` you uploaded under. Optionally include a `filenames` array to limit the run to specific files; if omitted, the API iterates over every non-normalized file in that platform folder. Provide any overrides (currency code, attribution, dimension IDs) required for your dataset.
 
-6. **Review the response** to confirm the per-file counts and warnings look correct. Each entry explains whether rows were ingested, skipped (no data), or part of a dry run, while `summary` reiterates the inserted/updated/skipped totals. Every entry also reports the `normalized_path` ending with `__normalized.csv`, indicating the normalization step succeeded.
+6. **Review the response** to confirm the per-file counts and warnings look correct. Each entry explains whether rows were ingested, skipped (no data), or part of a dry run, while `summary` reiterates the inserted/updated/skipped totals. Every entry also reports the `normalized_path` ending with `__normalized.csv`, indicating the normalization step succeeded, and `log_path`, which points to `data/logs/ingestion.log` so you can inspect the verbatim pipeline trace for that run.
 
 7. **Verify the event log** by querying the `event_ingestion_log` table. The API writes a record for every ingestion run, including failures, so you can audit the outcomes.
 

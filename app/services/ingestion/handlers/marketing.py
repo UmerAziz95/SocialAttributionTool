@@ -59,6 +59,8 @@ class MarketingHandler(IngestionHandler):
     )
     ad_name_fields: tuple[str, ...] = ("ad_name",)
     ad_external_id_fields: tuple[str, ...] = ("ad_id", "external_ad_id")
+    require_adset_inputs: bool = True
+    require_ad_inputs: bool = True
 
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         lowered = file_path.lower()
@@ -80,22 +82,24 @@ class MarketingHandler(IngestionHandler):
             candidates=self.campaign_name_fields + self.campaign_external_id_fields,
             label="campaign",
         )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="adset_id",
-            map_key="adset_map",
-            candidates=self.adset_name_fields + self.adset_external_id_fields,
-            label="ad set/ad group",
-        )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="ad_id",
-            map_key="ad_map",
-            candidates=self.ad_name_fields + self.ad_external_id_fields,
-            label="ad",
-        )
+        if self.require_adset_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="adset_id",
+                map_key="adset_map",
+                candidates=self.adset_name_fields + self.adset_external_id_fields,
+                label="ad set/ad group",
+            )
+        if self.require_ad_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="ad_id",
+                map_key="ad_map",
+                candidates=self.ad_name_fields + self.ad_external_id_fields,
+                label="ad",
+            )
 
     async def ingest(
         self,
@@ -170,6 +174,7 @@ class MarketingHandler(IngestionHandler):
         region_ids: set[int] = set()
         include_null_region = False
         date_ids: set[int] = set()
+        date_labels: set[str] = set()
         campaign_ids: set[int] = set()
         adset_ids: set[int] = set()
         ad_ids: set[int] = set()
@@ -206,6 +211,7 @@ class MarketingHandler(IngestionHandler):
                 date=str(parsed_date),
                 date_id=date_id,
             )
+            date_labels.add(parsed_date.isoformat())
 
             campaign_id = await self._resolve_campaign_id(
                 session,
@@ -459,6 +465,28 @@ class MarketingHandler(IngestionHandler):
         if payload:
             await session.execute(insert(FactMarketingDaily), payload)
         await session.commit()
+
+        if date_labels:
+            date_range = (min(date_labels), max(date_labels))
+        else:
+            date_range = None
+
+        log_event(
+            "MARKETING_FACT_SUMMARY",
+            handler=self.__class__.__name__,
+            file=context.file_path,
+            rows_inserted=len(payload),
+            rows_skipped=skipped_rows,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaigns=len(campaign_ids),
+            adsets=len(adset_ids),
+            ads=len(ad_ids),
+            dma=len(dma_ids),
+            regions=len(region_ids),
+            date_range=date_range,
+            currency_code=currency_code,
+        )
 
         log_event(
             "DATABASE_WRITE_COMPLETE",
@@ -838,6 +866,13 @@ class TikTokRegionHandler(MarketingHandler):
     required_columns = ("subregion", "by_day", "cost")
     date_column = "by_day"
     region_column = "subregion"
+    require_adset_inputs = False
+    require_ad_inputs = False
+    # Region extracts do not expose ad group or ad level identifiers.  Treat the
+    # subregion label as the ad set/ad surrogate so the handler can still create
+    # dimension rows (scoped to the campaign) and persist fact records.
+    adset_name_fields = ("subregion", "campaign_name")
+    ad_name_fields = ("subregion", "campaign_name")
     metric_specs = {
         "spend": MetricSpec("cost", parse_decimal),
         "impressions": MetricSpec("impressions", parse_int),
