@@ -177,21 +177,35 @@ def load_normalized_artifact(path: Path) -> NormalizationResult:
                 status_code=400,
                 detail=f"Normalized file '{path.name}' does not contain headers",
             )
-        rows = [
-            NormalizedRow({key: (value or "") for key, value in (row or {}).items()})
-            for row in reader
-        ]
+
+        raw_headers = list(headers)
+        normalized_headers = [_normalize_header(header) for header in raw_headers]
+        if raw_headers != normalized_headers:
+            log_event(
+                "NORMALIZED_HEADERS_STANDARDIZED",
+                source=path,
+                raw_headers=raw_headers,
+                normalized_headers=normalized_headers,
+            )
+
+        rows: list[NormalizedRow] = []
+        for row in reader:
+            values: dict[str, str] = {}
+            for raw_header, normalized_header in zip(raw_headers, normalized_headers):
+                cell = (row or {}).get(raw_header, "")
+                values[normalized_header] = (cell or "").strip()
+            rows.append(NormalizedRow(values))
 
     log_event(
         "NORMALIZED_FILE_LOADED",
         source=path,
         row_count=len(rows),
-        header_count=len(headers),
+        header_count=len(normalized_headers),
     )
 
     return NormalizationResult(
         path=path,
-        headers=list(headers),
+        headers=normalized_headers,
         rows=rows,
         encoding="utf-8",
         delimiter=",",

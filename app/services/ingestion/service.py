@@ -150,6 +150,17 @@ class FileIngestionService:
                 warnings=result.warnings,
             )
             log_event(
+                "INGESTION_FILE_SUMMARY",
+                handler=handler.__class__.__name__,
+                file=context.file_path,
+                normalized=context.normalized_path,
+                inserted=result.inserted,
+                updated=result.updated,
+                skipped=result.skipped,
+                warnings_count=len(result.warnings),
+                status=result.status,
+            )
+            log_event(
                 "STAGE_COMPLETE",
                 stage="database_write",
                 handler=handler.__class__.__name__,

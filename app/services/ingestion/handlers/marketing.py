@@ -174,6 +174,7 @@ class MarketingHandler(IngestionHandler):
         region_ids: set[int] = set()
         include_null_region = False
         date_ids: set[int] = set()
+        date_labels: set[str] = set()
         campaign_ids: set[int] = set()
         adset_ids: set[int] = set()
         ad_ids: set[int] = set()
@@ -210,6 +211,7 @@ class MarketingHandler(IngestionHandler):
                 date=str(parsed_date),
                 date_id=date_id,
             )
+            date_labels.add(parsed_date.isoformat())
 
             campaign_id = await self._resolve_campaign_id(
                 session,
@@ -463,6 +465,28 @@ class MarketingHandler(IngestionHandler):
         if payload:
             await session.execute(insert(FactMarketingDaily), payload)
         await session.commit()
+
+        if date_labels:
+            date_range = (min(date_labels), max(date_labels))
+        else:
+            date_range = None
+
+        log_event(
+            "MARKETING_FACT_SUMMARY",
+            handler=self.__class__.__name__,
+            file=context.file_path,
+            rows_inserted=len(payload),
+            rows_skipped=skipped_rows,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaigns=len(campaign_ids),
+            adsets=len(adset_ids),
+            ads=len(ad_ids),
+            dma=len(dma_ids),
+            regions=len(region_ids),
+            date_range=date_range,
+            currency_code=currency_code,
+        )
 
         log_event(
             "DATABASE_WRITE_COMPLETE",
