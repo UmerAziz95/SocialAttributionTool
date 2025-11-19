@@ -38,9 +38,7 @@ class UploadedFileMetadata(BaseModel):
 class MultiFileUploadResponse(BaseModel):
     """Response returned after uploading one or more files for a platform."""
 
-    platform: IngestionPlatform = Field(
-        ..., description="Platform folder the files were stored under"
-    )
+    platform: IngestionPlatform = Field(..., description="Platform folder the files were stored under")
     files: List[UploadedFileMetadata] = Field(
         ..., description="Metadata for each uploaded file in the request"
     )

@@ -10,6 +10,25 @@ _LOG_DIR = Path("data/logs")
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "ingestion.log"
 
+_IMPORTANT_EVENTS = {
+    "STAGE_START",
+    "STAGE_COMPLETE",
+    "INGEST_START",
+    "HANDLER_SELECTED",
+    "NORMALIZATION_BEGIN",
+    "NORMALIZATION_COMPLETE",
+    "NORMALIZATION_REUSED",
+    "VALIDATION_BEGIN",
+    "VALIDATION_COMPLETE",
+    "INGESTION_BEGIN",
+    "INGESTION_COMPLETE",
+    "INGESTION_ERROR",
+    "DATABASE_WRITE_COMPLETE",
+    "HANDLER_CONTEXT_RESOLVED",
+    "PLATFORM_DIMENSION_ENSURED",
+    "ACCOUNT_DIMENSION_ENSURED",
+}
+
 
 def get_ingestion_logger() -> logging.Logger:
     """Return a configured logger writing to the ingestion log file."""
@@ -27,7 +46,7 @@ def get_ingestion_logger() -> logging.Logger:
     return logger
 
 
-def log_event(event: str, *, level: int = logging.INFO, **fields: object) -> None:
+def log_event(event: str, *, level: int | None = None, **fields: object) -> None:
     """Log a structured ingestion event in a consistent key=value format.
 
     Parameters
@@ -41,6 +60,10 @@ def log_event(event: str, *, level: int = logging.INFO, **fields: object) -> Non
     """
 
     logger = get_ingestion_logger()
+    if level is None:
+        level = logging.INFO if event in _IMPORTANT_EVENTS else logging.DEBUG
+    if not logger.isEnabledFor(level):
+        return
     serialized_fields = " | ".join(
         f"{key}={value}" for key, value in sorted(fields.items())
     )

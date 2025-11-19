@@ -59,6 +59,8 @@ class MarketingHandler(IngestionHandler):
     )
     ad_name_fields: tuple[str, ...] = ("ad_name",)
     ad_external_id_fields: tuple[str, ...] = ("ad_id", "external_ad_id")
+    require_adset_inputs: bool = True
+    require_ad_inputs: bool = True
 
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         lowered = file_path.lower()
@@ -80,22 +82,24 @@ class MarketingHandler(IngestionHandler):
             candidates=self.campaign_name_fields + self.campaign_external_id_fields,
             label="campaign",
         )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="adset_id",
-            map_key="adset_map",
-            candidates=self.adset_name_fields + self.adset_external_id_fields,
-            label="ad set/ad group",
-        )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="ad_id",
-            map_key="ad_map",
-            candidates=self.ad_name_fields + self.ad_external_id_fields,
-            label="ad",
-        )
+        if self.require_adset_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="adset_id",
+                map_key="adset_map",
+                candidates=self.adset_name_fields + self.adset_external_id_fields,
+                label="ad set/ad group",
+            )
+        if self.require_ad_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="ad_id",
+                map_key="ad_map",
+                candidates=self.ad_name_fields + self.ad_external_id_fields,
+                label="ad",
+            )
 
     async def ingest(
         self,
@@ -838,6 +842,8 @@ class TikTokRegionHandler(MarketingHandler):
     required_columns = ("subregion", "by_day", "cost")
     date_column = "by_day"
     region_column = "subregion"
+    require_adset_inputs = False
+    require_ad_inputs = False
     # Region extracts do not expose ad group or ad level identifiers.  Treat the
     # subregion label as the ad set/ad surrogate so the handler can still create
     # dimension rows (scoped to the campaign) and persist fact records.

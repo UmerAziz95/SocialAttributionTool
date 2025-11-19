@@ -10,4 +10,4 @@ class TikTokByDMANormalizationService(FileNormalizationService):
         super().__init__(TikTokByDMARepository())
 
 
-__all__ = ["TikTokByDMANormalizationService"] 
+__all__ = ["TikTokByDMANormalizationService"]
