@@ -50,4 +50,10 @@ def log_event(event: str, *, level: int = logging.INFO, **fields: object) -> Non
     logger.log(level, message)
 
 
-__all__ = ["get_ingestion_logger", "log_event"]
+def get_ingestion_log_path() -> Path:
+    """Expose the ingestion log destination so API responses can surface it."""
+
+    return _LOG_FILE
+
+
+__all__ = ["get_ingestion_logger", "get_ingestion_log_path", "log_event"]

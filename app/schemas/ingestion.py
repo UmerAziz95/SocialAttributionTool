@@ -133,20 +133,13 @@ class FileIngestionResponse(BaseModel):
     inserted: int = Field(..., ge=0, description="Number of new records written")
     updated: int = Field(..., ge=0, description="Number of existing rows updated")
     skipped: int = Field(..., ge=0, description="Rows skipped after validation errors")
-    warnings: List[str] = Field(
-        default_factory=list, description="Non-fatal warnings"
-    )
-    status: str = Field(
-        ..., description="Overall ingestion status (ingested, dry_run, no_data, failed)"
-    )
-    summary: str = Field(
-        ..., description="Human-readable description of what happened during ingestion"
-    )
-    duration_sec: float = Field(
-        ..., ge=0, description="Total execution time in seconds"
-    )
-    normalized_path: Path = Field(
-        ..., description="Location of the normalized CSV copy"
+    warnings: List[str] = Field(default_factory=list, description="Non-fatal warnings")
+    status: str = Field(..., description="Overall ingestion status (ingested, dry_run, no_data, failed)")
+    summary: str = Field(..., description="Human-readable description of what happened during ingestion")
+    duration_sec: float = Field(..., ge=0, description="Total execution time in seconds")
+    normalized_path: Path = Field(..., description="Location of the normalized CSV copy")
+    log_path: Path = Field(
+        ..., description="Path to the ingestion log file that captured this run"
     )
 
     model_config = {
@@ -164,6 +157,7 @@ class FileIngestionResponse(BaseModel):
                 "summary": "Inserted records into the warehouse. Inserted=250, Updated=12, Skipped=3.",
                 "duration_sec": 4.21,
                 "normalized_path": "/app/data/uploads/DMA_Performance_Meta__normalized.csv",
+                "log_path": "/app/data/logs/ingestion.log",
             }
         }
     }

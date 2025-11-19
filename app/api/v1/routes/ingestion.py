@@ -19,7 +19,7 @@ from app.schemas.ingestion import (
     PlatformIngestionResponse,
     UploadedFileMetadata,
 )
-from app.services.ingestion.logging import log_event
+from app.services.ingestion.logging import get_ingestion_log_path, log_event
 from app.services.ingestion.storage import resolve_uploaded_path
 from app.services.ingestion.service import FileIngestionService
 from app.services.ingestion.types import IngestionContext
@@ -281,6 +281,7 @@ async def ingest_single_file(
         batch_size=payload.batch_size or 500,
     )
     normalized_path = context.normalized_path or context.file_path
+    log_path = get_ingestion_log_path()
     return FileIngestionResponse(
         filename=payload.filename,
         file_path=context.file_path,
@@ -292,6 +293,7 @@ async def ingest_single_file(
         summary=result.summary,
         duration_sec=result.duration_seconds,
         normalized_path=normalized_path,
+        log_path=log_path,
     )
 
 
@@ -340,6 +342,7 @@ async def ingest_platform_files(
 
     service = FileIngestionService()
     results: list[FileIngestionResponse] = []
+    log_path = get_ingestion_log_path()
     for file_path in candidate_paths:
         context = IngestionContext(
             file_path=file_path,
@@ -375,6 +378,7 @@ async def ingest_platform_files(
                 summary=result.summary,
                 duration_sec=result.duration_seconds,
                 normalized_path=context.normalized_path,
+                log_path=log_path,
             )
         )
 
