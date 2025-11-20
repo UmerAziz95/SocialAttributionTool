@@ -531,6 +531,29 @@ class MarketingHandler(IngestionHandler):
             currency_code=currency_code,
         )
 
+        if date_labels:
+            date_range = (min(date_labels), max(date_labels))
+        else:
+            date_range = None
+
+        log_event(
+            "MARKETING_FACT_SUMMARY",
+            handler=self.__class__.__name__,
+            file=context.file_path,
+            rows_inserted=len(payload),
+            rows_skipped=skipped_rows,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaigns=len(campaign_ids),
+            adsets=len(adset_ids),
+            ads=len(ad_ids),
+            dma=len(dma_ids),
+            regions=len(region_ids),
+            countries=len(country_ids),
+            date_range=date_range,
+            currency_code=currency_code,
+        )
+
         log_event(
             "DATABASE_WRITE_COMPLETE",
             handler=self.__class__.__name__,
