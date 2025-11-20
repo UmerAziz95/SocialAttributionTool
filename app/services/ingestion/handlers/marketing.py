@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Iterable
 
 from sqlalchemy import delete, insert, or_
@@ -420,6 +421,8 @@ class MarketingHandler(IngestionHandler):
                 warnings=warnings,
             )
             result.inserted = len(payload)
+            result.finished_at = datetime.utcnow()
+            result.status = "success"
             if context.dry_run:
                 result.summary = (
                     f"Dry run prepared {len(payload)} marketing rows for fact_marketing_daily; "
@@ -519,7 +522,9 @@ class MarketingHandler(IngestionHandler):
             warnings=warnings,
         )
 
+        result.status = "success"
         result.inserted = len(payload)
+        result.finished_at = datetime.utcnow()
         result.summary = (
             f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
         )
