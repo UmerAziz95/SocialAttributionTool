@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Iterable
 
-from sqlalchemy import delete, insert, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import DimRegion, FactMarketingDaily
@@ -468,52 +468,6 @@ class MarketingHandler(IngestionHandler):
                 )
             return result
 
-        delete_conditions = [
-            FactMarketingDaily.platform_id == platform_id,
-            FactMarketingDaily.account_id == account_id,
-            FactMarketingDaily.date_id.in_(date_ids),
-        ]
-        if campaign_ids:
-            delete_conditions.append(FactMarketingDaily.campaign_id.in_(campaign_ids))
-        if adset_ids:
-            delete_conditions.append(FactMarketingDaily.adset_id.in_(adset_ids))
-        if ad_ids:
-            delete_conditions.append(FactMarketingDaily.ad_id.in_(ad_ids))
-
-        delete_stmt = delete(FactMarketingDaily).where(*delete_conditions)
-        if self.dma_column and (dma_ids or include_null_dma):
-            dma_filters: list = []
-            if dma_ids:
-                dma_filters.append(FactMarketingDaily.dma_id.in_(dma_ids))
-            if include_null_dma:
-                dma_filters.append(FactMarketingDaily.dma_id.is_(None))
-            if dma_filters:
-                delete_stmt = delete_stmt.where(
-                    or_(*dma_filters) if len(dma_filters) > 1 else dma_filters[0]
-                )
-        if self.region_column and (region_ids or include_null_region):
-            region_filters: list = []
-            if region_ids:
-                region_filters.append(FactMarketingDaily.region_id.in_(region_ids))
-            if include_null_region:
-                region_filters.append(FactMarketingDaily.region_id.is_(None))
-            if region_filters:
-                delete_stmt = delete_stmt.where(
-                    or_(*region_filters) if len(region_filters) > 1 else region_filters[0]
-                )
-        if (country_ids or include_null_country) and self.region_column:
-            country_filters: list = []
-            if country_ids:
-                country_filters.append(FactMarketingDaily.country_id.in_(country_ids))
-            if include_null_country:
-                country_filters.append(FactMarketingDaily.country_id.is_(None))
-            if country_filters:
-                delete_stmt = delete_stmt.where(
-                    or_(*country_filters)
-                    if len(country_filters) > 1
-                    else country_filters[0]
-                )
-
         log_event(
             "DATABASE_WRITE_BEGIN",
             handler=self.__class__.__name__,
@@ -526,21 +480,56 @@ class MarketingHandler(IngestionHandler):
             unique_countries=len(country_ids),
             includes_null_country=include_null_country,
         )
-        log_event(
-            "DATABASE_DELETE_SCOPE",
-            handler=self.__class__.__name__,
-            date_ids=sorted(date_ids),
-            dma_ids=sorted(dma_ids),
-            include_null_dma=include_null_dma,
-            region_ids=sorted(region_ids),
-            include_null_region=include_null_region,
-            country_ids=sorted(country_ids),
-            include_null_country=include_null_country,
-        )
-        await session.execute(delete_stmt)
+
         if payload:
-            await session.execute(insert(FactMarketingDaily), payload)
+            upsert_stmt = pg_insert(FactMarketingDaily).values(payload)
+            update_fields = {
+                "attribution_id": upsert_stmt.excluded.attribution_id,
+                "country_id": upsert_stmt.excluded.country_id,
+                "region_id": upsert_stmt.excluded.region_id,
+                "dma_id": upsert_stmt.excluded.dma_id,
+                "currency_code": upsert_stmt.excluded.currency_code,
+                "spend": upsert_stmt.excluded.spend,
+                "impressions": upsert_stmt.excluded.impressions,
+                "clicks": upsert_stmt.excluded.clicks,
+                "conversions": upsert_stmt.excluded.conversions,
+                "conversion_value": upsert_stmt.excluded.conversion_value,
+                "video_view_time": upsert_stmt.excluded.video_view_time,
+                "frequency": upsert_stmt.excluded.frequency,
+                "reach": upsert_stmt.excluded.reach,
+                "add_to_cart": upsert_stmt.excluded.add_to_cart,
+            }
+
+            await session.execute(
+                upsert_stmt.on_conflict_do_update(
+                    constraint="ux_fact_marketing_daily_grain",
+                    set_=update_fields,
+                )
+            )
         await session.commit()
+
+        if date_labels:
+            date_range = (min(date_labels), max(date_labels))
+        else:
+            date_range = None
+
+        log_event(
+            "MARKETING_FACT_SUMMARY",
+            handler=self.__class__.__name__,
+            file=context.file_path,
+            rows_inserted=len(payload),
+            rows_skipped=skipped_rows,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaigns=len(campaign_ids),
+            adsets=len(adset_ids),
+            ads=len(ad_ids),
+            dma=len(dma_ids),
+            regions=len(region_ids),
+            countries=len(country_ids),
+            date_range=date_range,
+            currency_code=currency_code,
+        )
 
         if date_labels:
             date_range = (min(date_labels), max(date_labels))
