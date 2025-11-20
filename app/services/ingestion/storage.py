@@ -83,6 +83,22 @@ def resolve_uploaded_path(
             )
             return candidate_path
 
+    # Fall back to case-insensitive matching within the platform directory when the
+    # caller supplied a filename whose casing differs from what was uploaded (for
+    # example "tiktok_by_ads_freq_AddToCart.csv"). This keeps ingestion resilient
+    # to Windows/OSX uploads while still respecting the per-platform folder.
+    filename_lower = Path(normalized).name.lower()
+    if filename_lower and platform_dir and platform_dir.exists():
+        for entry in platform_dir.iterdir():
+            if entry.is_file() and entry.name.lower() == filename_lower:
+                log_event(
+                    "RESOLVE_PATH_SUCCESS",
+                    provided=raw_value,
+                    resolved=entry,
+                    matched_case_insensitive=True,
+                )
+                return entry
+
     raise HTTPException(
         status_code=404,
         detail=(
