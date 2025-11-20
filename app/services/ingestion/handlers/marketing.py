@@ -8,7 +8,7 @@ from typing import Callable, Iterable
 from sqlalchemy import delete, insert, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.marketing import FactMarketingDaily
+from app.models.marketing import DimRegion, FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import (
     DimensionResolver,
@@ -17,7 +17,9 @@ from app.services.ingestion.dimensions import (
     ensure_adset_id,
     ensure_campaign_id,
     ensure_date_id,
+    ensure_country_id,
     ensure_dma_id,
+    ensure_region_id,
     ensure_platform_id,
     standardize_dma_label,
 )
@@ -188,6 +190,8 @@ class MarketingHandler(IngestionHandler):
         include_null_dma = False
         region_ids: set[int] = set()
         include_null_region = False
+        country_ids: set[int] = set()
+        include_null_country = False
         date_ids: set[int] = set()
         date_labels: set[str] = set()
         campaign_ids: set[int] = set()
@@ -331,22 +335,47 @@ class MarketingHandler(IngestionHandler):
                                     raise ValueError(f"Unable to resolve DMA '{raw_dma}'")
 
             region_id = None
+            country_id = None
             if self.region_column:
                 raw_region = values.get(self.region_column, "") or ""
                 region_id = resolver.resolve_mapping("region_map", raw_region)
-                if raw_region and region_id is None:
-                    warnings.append(
-                        f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
-                    )
-                    log_event(
-                        "ROW_REGION_UNRESOLVED",
-                        handler=self.__class__.__name__,
-                        row_index=index,
-                        raw_value=raw_region,
-                    )
-                    if context.fail_fast:
-                        raise ValueError(f"Unable to resolve region '{raw_region}'")
-                    region_id = None
+                if raw_region:
+                    if "country_id" in resolver.column_map:
+                        country_id = self._coerce_int(
+                            resolver.optional("country_id"), "country_id"
+                        )
+                    if region_id is None:
+                        try:
+                            country_id = country_id or await ensure_country_id(session)
+                            region_id = await ensure_region_id(
+                                session, country_id=country_id, name=raw_region
+                            )
+                            log_event(
+                                "ROW_REGION_CREATED",
+                                handler=self.__class__.__name__,
+                                row_index=index,
+                                region_id=region_id,
+                                country_id=country_id,
+                                region_name=raw_region,
+                            )
+                        except Exception:
+                            warnings.append(
+                                f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
+                            )
+                            log_event(
+                                "ROW_REGION_UNRESOLVED",
+                                handler=self.__class__.__name__,
+                                row_index=index,
+                                raw_value=raw_region,
+                            )
+                            if context.fail_fast:
+                                raise
+                            region_id = None
+                            country_id = country_id or None
+                    elif country_id is None:
+                        existing_region = await session.get(DimRegion, region_id)
+                        if existing_region:
+                            country_id = existing_region.country_id
 
             metrics: dict[str, object] = {}
             for target_column, spec in self.metric_specs.items():
@@ -363,6 +392,7 @@ class MarketingHandler(IngestionHandler):
                     "date_id": date_id,
                     "attribution_id": attribution_id,
                     "dma_id": dma_id,
+                    "country_id": country_id,
                     "region_id": region_id,
                     "currency_code": currency_code,
                     **metrics,
@@ -377,6 +407,10 @@ class MarketingHandler(IngestionHandler):
                 region_ids.add(region_id)
             else:
                 include_null_region = include_null_region or bool(self.region_column)
+            if country_id is not None:
+                country_ids.add(country_id)
+            else:
+                include_null_country = include_null_country or bool(self.region_column)
             campaign_ids.add(campaign_id)
             adset_ids.add(adset_id)
             ad_ids.add(ad_id)
@@ -467,6 +501,18 @@ class MarketingHandler(IngestionHandler):
                 delete_stmt = delete_stmt.where(
                     or_(*region_filters) if len(region_filters) > 1 else region_filters[0]
                 )
+        if (country_ids or include_null_country) and self.region_column:
+            country_filters: list = []
+            if country_ids:
+                country_filters.append(FactMarketingDaily.country_id.in_(country_ids))
+            if include_null_country:
+                country_filters.append(FactMarketingDaily.country_id.is_(None))
+            if country_filters:
+                delete_stmt = delete_stmt.where(
+                    or_(*country_filters)
+                    if len(country_filters) > 1
+                    else country_filters[0]
+                )
 
         log_event(
             "DATABASE_WRITE_BEGIN",
@@ -477,6 +523,8 @@ class MarketingHandler(IngestionHandler):
             includes_null_dma=include_null_dma,
             unique_regions=len(region_ids),
             includes_null_region=include_null_region,
+            unique_countries=len(country_ids),
+            includes_null_country=include_null_country,
         )
         log_event(
             "DATABASE_DELETE_SCOPE",
@@ -486,6 +534,8 @@ class MarketingHandler(IngestionHandler):
             include_null_dma=include_null_dma,
             region_ids=sorted(region_ids),
             include_null_region=include_null_region,
+            country_ids=sorted(country_ids),
+            include_null_country=include_null_country,
         )
         await session.execute(delete_stmt)
         if payload:
@@ -510,6 +560,7 @@ class MarketingHandler(IngestionHandler):
             ads=len(ad_ids),
             dma=len(dma_ids),
             regions=len(region_ids),
+            countries=len(country_ids),
             date_range=date_range,
             currency_code=currency_code,
         )

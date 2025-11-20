@@ -14,9 +14,11 @@ from app.models.marketing import (
     DimAdsetOrAdgroup,
     DimAccount,
     DimCampaign,
+    DimCountry,
     DimDMA,
     DimDate,
     DimPlatform,
+    DimRegion,
     MapPlatformDMA,
 )
 
@@ -177,6 +179,71 @@ async def ensure_dma_id(
         await session.flush()
 
     return dma_id
+
+
+async def ensure_country_id(
+    session: AsyncSession,
+    *,
+    iso2: str = "ZZ",
+    name: str = "Unknown",
+) -> int:
+    """Ensure a country exists for the given ISO2 code (defaults to Unknown).
+
+    TikTok region extracts often omit country identifiers.  To keep the
+    region->country relationship non-null, fall back to an "Unknown" country
+    unless the caller supplies a specific country_id or ISO2 code.
+    """
+
+    normalized_iso2 = (iso2 or "").strip().upper() or "ZZ"
+
+    stmt = (
+        select(DimCountry.country_id)
+        .where(func.upper(DimCountry.iso2) == normalized_iso2)
+        .limit(1)
+    )
+    existing_id = (await session.execute(stmt)).scalar_one_or_none()
+    if existing_id is not None:
+        return existing_id
+
+    country = DimCountry(iso2=normalized_iso2, country_name=name or normalized_iso2)
+    session.add(country)
+    await session.flush()
+    return country.country_id
+
+
+async def ensure_region_id(
+    session: AsyncSession,
+    *,
+    country_id: int,
+    name: str,
+    iso_subdivision: str | None = None,
+) -> int:
+    """Ensure a region exists beneath the supplied country."""
+
+    normalized_name = " ".join((name or "").split())
+    if not normalized_name:
+        raise ValueError("Region name is required to ensure a region dimension")
+
+    stmt = (
+        select(DimRegion)
+        .where(
+            DimRegion.country_id == country_id,
+            func.lower(DimRegion.region_name) == normalized_name.lower(),
+        )
+        .limit(1)
+    )
+    existing = (await session.execute(stmt)).scalar_one_or_none()
+    if existing:
+        return existing.region_id
+
+    region = DimRegion(
+        country_id=country_id,
+        region_name=normalized_name,
+        iso_subdivision=iso_subdivision,
+    )
+    session.add(region)
+    await session.flush()
+    return region.region_id
 
 
 async def ensure_account_id(
