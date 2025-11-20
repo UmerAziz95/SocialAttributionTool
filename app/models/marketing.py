@@ -136,8 +136,22 @@ class DimDate(Base):
     year: Mapped[Optional[int]] = mapped_column(Integer)
 
 
-class FactMarketingDaily(Base):                               
-    __tablename__ = "fact_marketing_daily"             
+class FactMarketingDaily(Base):
+    __tablename__ = "fact_marketing_daily"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform_id",
+            "account_id",
+            "campaign_id",
+            "adset_id",
+            "ad_id",
+            "date_id",
+            "dma_id",
+            "region_id",
+            "country_id",
+            name="ux_fact_marketing_daily_grain",
+        ),
+    )
 
     fact_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     platform_id: Mapped[int] = mapped_column(ForeignKey("dim_platform.platform_id"), nullable=False)
