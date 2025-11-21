@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Iterable
 
-from sqlalchemy import delete, insert, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.marketing import FactMarketingDaily
+from app.models.marketing import DimRegion, FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import (
     DimensionResolver,
@@ -16,7 +17,9 @@ from app.services.ingestion.dimensions import (
     ensure_adset_id,
     ensure_campaign_id,
     ensure_date_id,
+    ensure_country_id,
     ensure_dma_id,
+    ensure_region_id,
     ensure_platform_id,
     standardize_dma_label,
 )
@@ -59,6 +62,22 @@ class MarketingHandler(IngestionHandler):
     )
     ad_name_fields: tuple[str, ...] = ("ad_name",)
     ad_external_id_fields: tuple[str, ...] = ("ad_id", "external_ad_id")
+    require_adset_inputs: bool = True
+    require_ad_inputs: bool = True
+
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        """Hook for subclasses that need to synthesize ad set names."""
+
+        return None
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        """Hook for subclasses that need to synthesize ad names."""
+
+        return None
 
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         lowered = file_path.lower()
@@ -80,22 +99,24 @@ class MarketingHandler(IngestionHandler):
             candidates=self.campaign_name_fields + self.campaign_external_id_fields,
             label="campaign",
         )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="adset_id",
-            map_key="adset_map",
-            candidates=self.adset_name_fields + self.adset_external_id_fields,
-            label="ad set/ad group",
-        )
-        self._ensure_dimension_inputs(
-            normalized,
-            context,
-            direct_key="ad_id",
-            map_key="ad_map",
-            candidates=self.ad_name_fields + self.ad_external_id_fields,
-            label="ad",
-        )
+        if self.require_adset_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="adset_id",
+                map_key="adset_map",
+                candidates=self.adset_name_fields + self.adset_external_id_fields,
+                label="ad set/ad group",
+            )
+        if self.require_ad_inputs:
+            self._ensure_dimension_inputs(
+                normalized,
+                context,
+                direct_key="ad_id",
+                map_key="ad_map",
+                candidates=self.ad_name_fields + self.ad_external_id_fields,
+                label="ad",
+            )
 
     async def ingest(
         self,
@@ -162,14 +183,21 @@ class MarketingHandler(IngestionHandler):
             currency_code=currency_code,
         )
 
-        payload: list[dict] = []
+        payload_chunk: list[dict] = []
+        total_prepared = 0
+        total_written = 0
+        batch_size = max(1, context.batch_size)
+        first_payload_sample: dict | None = None
         warnings: list[str] = []
 
         dma_ids: set[int] = set()
         include_null_dma = False
         region_ids: set[int] = set()
         include_null_region = False
+        country_ids: set[int] = set()
+        include_null_country = False
         date_ids: set[int] = set()
+        date_labels: set[str] = set()
         campaign_ids: set[int] = set()
         adset_ids: set[int] = set()
         ad_ids: set[int] = set()
@@ -178,6 +206,40 @@ class MarketingHandler(IngestionHandler):
         ad_cache: dict[tuple[int, str, str], int] = {}
 
         skipped_rows = 0
+
+        async def flush_chunk() -> None:
+            nonlocal total_written
+            if not payload_chunk:
+                return
+
+            upsert_stmt = pg_insert(FactMarketingDaily).values(payload_chunk)
+            update_fields = {
+                "attribution_id": upsert_stmt.excluded.attribution_id,
+                "country_id": upsert_stmt.excluded.country_id,
+                "region_id": upsert_stmt.excluded.region_id,
+                "dma_id": upsert_stmt.excluded.dma_id,
+                "currency_code": upsert_stmt.excluded.currency_code,
+                "spend": upsert_stmt.excluded.spend,
+                "impressions": upsert_stmt.excluded.impressions,
+                "clicks": upsert_stmt.excluded.clicks,
+                "conversions": upsert_stmt.excluded.conversions,
+                "conversion_value": upsert_stmt.excluded.conversion_value,
+                "video_view_time": upsert_stmt.excluded.video_view_time,
+                "frequency": upsert_stmt.excluded.frequency,
+                "reach": upsert_stmt.excluded.reach,
+                "add_to_cart": upsert_stmt.excluded.add_to_cart,
+            }
+
+            await session.execute(
+                upsert_stmt.on_conflict_do_update(
+                    constraint="ux_fact_marketing_daily_grain",
+                    set_=update_fields,
+                )
+            )
+            await session.commit()
+
+            total_written += len(payload_chunk)
+            payload_chunk.clear()
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
@@ -206,6 +268,7 @@ class MarketingHandler(IngestionHandler):
                 date=str(parsed_date),
                 date_id=date_id,
             )
+            date_labels.add(parsed_date.isoformat())
 
             campaign_id = await self._resolve_campaign_id(
                 session,
@@ -310,43 +373,76 @@ class MarketingHandler(IngestionHandler):
                                     raise ValueError(f"Unable to resolve DMA '{raw_dma}'")
 
             region_id = None
+            country_id = None
             if self.region_column:
                 raw_region = values.get(self.region_column, "") or ""
                 region_id = resolver.resolve_mapping("region_map", raw_region)
-                if raw_region and region_id is None:
-                    warnings.append(
-                        f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
-                    )
-                    log_event(
-                        "ROW_REGION_UNRESOLVED",
-                        handler=self.__class__.__name__,
-                        row_index=index,
-                        raw_value=raw_region,
-                    )
-                    if context.fail_fast:
-                        raise ValueError(f"Unable to resolve region '{raw_region}'")
-                    region_id = None
+                if raw_region:
+                    if "country_id" in resolver.column_map:
+                        country_id = self._coerce_int(
+                            resolver.optional("country_id"), "country_id"
+                        )
+                    if region_id is None:
+                        try:
+                            country_id = country_id or await ensure_country_id(session)
+                            region_id = await ensure_region_id(
+                                session, country_id=country_id, name=raw_region
+                            )
+                            log_event(
+                                "ROW_REGION_CREATED",
+                                handler=self.__class__.__name__,
+                                row_index=index,
+                                region_id=region_id,
+                                country_id=country_id,
+                                region_name=raw_region,
+                            )
+                        except Exception:
+                            warnings.append(
+                                f"Row {index}: unknown region '{raw_region}' — add a column_map.region_map entry"
+                            )
+                            log_event(
+                                "ROW_REGION_UNRESOLVED",
+                                handler=self.__class__.__name__,
+                                row_index=index,
+                                raw_value=raw_region,
+                            )
+                            if context.fail_fast:
+                                raise
+                            region_id = None
+                            country_id = country_id or None
+                    elif country_id is None:
+                        existing_region = await session.get(DimRegion, region_id)
+                        if existing_region:
+                            country_id = existing_region.country_id
 
             metrics: dict[str, object] = {}
             for target_column, spec in self.metric_specs.items():
                 parsed_value = spec.parser(values.get(spec.column, ""))
                 metrics[target_column] = parsed_value
 
-            payload.append(
-                {
-                    "platform_id": platform_id,
-                    "account_id": account_id,
-                    "campaign_id": campaign_id,
-                    "adset_id": adset_id,
-                    "ad_id": ad_id,
-                    "date_id": date_id,
-                    "attribution_id": attribution_id,
-                    "dma_id": dma_id,
-                    "region_id": region_id,
-                    "currency_code": currency_code,
-                    **metrics,
-                }
-            )
+            row_payload = {
+                "platform_id": platform_id,
+                "account_id": account_id,
+                "campaign_id": campaign_id,
+                "adset_id": adset_id,
+                "ad_id": ad_id,
+                "date_id": date_id,
+                "attribution_id": attribution_id,
+                "dma_id": dma_id,
+                "country_id": country_id,
+                "region_id": region_id,
+                "currency_code": currency_code,
+                **metrics,
+            }
+
+            if first_payload_sample is None:
+                first_payload_sample = row_payload
+
+            total_prepared += 1
+            if not context.dry_run:
+                payload_chunk.append(row_payload)
+                if len(payload_chunk) >= batch_size:
+                    await flush_chunk()
             date_ids.add(date_id)
             if dma_id is not None:
                 dma_ids.add(dma_id)
@@ -356,6 +452,10 @@ class MarketingHandler(IngestionHandler):
                 region_ids.add(region_id)
             else:
                 include_null_region = include_null_region or bool(self.region_column)
+            if country_id is not None:
+                country_ids.add(country_id)
+            else:
+                include_null_country = include_null_country or bool(self.region_column)
             campaign_ids.add(campaign_id)
             adset_ids.add(adset_id)
             ad_ids.add(ad_id)
@@ -375,25 +475,36 @@ class MarketingHandler(IngestionHandler):
         log_event(
             "PAYLOAD_PREPARED",
             handler=self.__class__.__name__,
-            rows_prepared=len(payload),
+            rows_prepared=total_prepared,
             rows_skipped=skipped_rows,
             warnings_count=len(warnings),
-            sample_row=payload[0] if payload else None,
+            sample_row=first_payload_sample,
         )
 
-        if context.dry_run or not payload:
+        if context.dry_run or not total_prepared:
+            if not total_prepared and not context.dry_run:
+                log_event(
+                    "MARKETING_NO_ROWS",
+                    handler=self.__class__.__name__,
+                    file=context.file_path,
+                    rows_considered=len(normalized.rows),
+                    warnings_count=len(warnings),
+                    warnings_sample=warnings[:5],
+                )
             log_event(
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
                 handler=self.__class__.__name__,
                 rows_considered=len(normalized.rows),
-                payload_rows=len(payload),
+                payload_rows=total_prepared,
                 skipped=skipped_rows,
                 warnings=warnings,
             )
-            result.inserted = len(payload)
+            result.inserted = total_prepared
+            result.finished_at = datetime.utcnow()
+            result.status = "success"
             if context.dry_run:
                 result.summary = (
-                    f"Dry run prepared {len(payload)} marketing rows for fact_marketing_daily; "
+                    f"Dry run prepared {total_prepared} marketing rows for fact_marketing_daily; "
                     f"skipped {skipped_rows}."
                 )
             else:
@@ -402,75 +513,58 @@ class MarketingHandler(IngestionHandler):
                 )
             return result
 
-        delete_conditions = [
-            FactMarketingDaily.platform_id == platform_id,
-            FactMarketingDaily.account_id == account_id,
-            FactMarketingDaily.date_id.in_(date_ids),
-        ]
-        if campaign_ids:
-            delete_conditions.append(FactMarketingDaily.campaign_id.in_(campaign_ids))
-        if adset_ids:
-            delete_conditions.append(FactMarketingDaily.adset_id.in_(adset_ids))
-        if ad_ids:
-            delete_conditions.append(FactMarketingDaily.ad_id.in_(ad_ids))
-
-        delete_stmt = delete(FactMarketingDaily).where(*delete_conditions)
-        if self.dma_column and (dma_ids or include_null_dma):
-            dma_filters: list = []
-            if dma_ids:
-                dma_filters.append(FactMarketingDaily.dma_id.in_(dma_ids))
-            if include_null_dma:
-                dma_filters.append(FactMarketingDaily.dma_id.is_(None))
-            if dma_filters:
-                delete_stmt = delete_stmt.where(
-                    or_(*dma_filters) if len(dma_filters) > 1 else dma_filters[0]
-                )
-        if self.region_column and (region_ids or include_null_region):
-            region_filters: list = []
-            if region_ids:
-                region_filters.append(FactMarketingDaily.region_id.in_(region_ids))
-            if include_null_region:
-                region_filters.append(FactMarketingDaily.region_id.is_(None))
-            if region_filters:
-                delete_stmt = delete_stmt.where(
-                    or_(*region_filters) if len(region_filters) > 1 else region_filters[0]
-                )
-
         log_event(
             "DATABASE_WRITE_BEGIN",
             handler=self.__class__.__name__,
-            payload_rows=len(payload),
+            payload_rows=total_prepared,
             unique_dates=len(date_ids),
             unique_dmas=len(dma_ids),
             includes_null_dma=include_null_dma,
             unique_regions=len(region_ids),
             includes_null_region=include_null_region,
+            unique_countries=len(country_ids),
+            includes_null_country=include_null_country,
         )
+
+        if payload_chunk:
+            await flush_chunk()
+
+        if date_labels:
+            date_range = (min(date_labels), max(date_labels))
+        else:
+            date_range = None
+
         log_event(
-            "DATABASE_DELETE_SCOPE",
+            "MARKETING_FACT_SUMMARY",
             handler=self.__class__.__name__,
-            date_ids=sorted(date_ids),
-            dma_ids=sorted(dma_ids),
-            include_null_dma=include_null_dma,
-            region_ids=sorted(region_ids),
-            include_null_region=include_null_region,
+            file=context.file_path,
+            rows_inserted=total_written,
+            rows_skipped=skipped_rows,
+            platform_id=platform_id,
+            account_id=account_id,
+            campaigns=len(campaign_ids),
+            adsets=len(adset_ids),
+            ads=len(ad_ids),
+            dma=len(dma_ids),
+            regions=len(region_ids),
+            countries=len(country_ids),
+            date_range=date_range,
+            currency_code=currency_code,
         )
-        await session.execute(delete_stmt)
-        if payload:
-            await session.execute(insert(FactMarketingDaily), payload)
-        await session.commit()
 
         log_event(
             "DATABASE_WRITE_COMPLETE",
             handler=self.__class__.__name__,
-            inserted=len(payload),
+            inserted=total_written,
             skipped=skipped_rows,
             warnings=warnings,
         )
 
-        result.inserted = len(payload)
+        result.status = "success"
+        result.inserted = total_written
+        result.finished_at = datetime.utcnow()
         result.summary = (
-            f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
+            f"Inserted {total_written} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
         )
         return result
 
@@ -640,23 +734,38 @@ class MarketingHandler(IngestionHandler):
 
         adset_name = self._first_non_empty(values, self.adset_name_fields)
         adset_external_id = self._first_non_empty(values, self.adset_external_id_fields)
-        cache_key = (campaign_id, self._normalized_key(adset_external_id), self._normalized_key(adset_name))
+        cache_key = (
+            campaign_id,
+            self._normalized_key(adset_external_id),
+            self._normalized_key(adset_name),
+        )
 
         if cache_key[1] == "" and cache_key[2] == "":
-            warning = (
-                f"Row {row_index}: unable to determine ad set/ad group — provide column_map.adset_map "
-                "or ensure ad set columns exist."
-            )
-            warnings.append(warning)
-            log_event(
-                "ROW_SKIPPED_ADSET_UNRESOLVED",
-                handler=self.__class__.__name__,
-                row_index=row_index,
-                raw=values,
-            )
-            if context.fail_fast:
-                raise ValueError("Unable to resolve ad set for row")
-            return None
+            surrogate_name = self._fallback_adset_name(values, row_index)
+            if surrogate_name:
+                adset_name = surrogate_name
+                cache_key = (campaign_id, "", self._normalized_key(adset_name))
+                log_event(
+                    "ROW_ADSET_SURROGATE_ASSIGNED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    surrogate_name=surrogate_name,
+                )
+            else:
+                warning = (
+                    f"Row {row_index}: unable to determine ad set/ad group — provide column_map.adset_map "
+                    "or ensure ad set columns exist."
+                )
+                warnings.append(warning)
+                log_event(
+                    "ROW_SKIPPED_ADSET_UNRESOLVED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    raw=values,
+                )
+                if context.fail_fast:
+                    raise ValueError("Unable to resolve ad set for row")
+                return None
 
         if cache_key in cache:
             return cache[cache_key]
@@ -714,22 +823,37 @@ class MarketingHandler(IngestionHandler):
 
         ad_name = self._first_non_empty(values, self.ad_name_fields)
         ad_external_id = self._first_non_empty(values, self.ad_external_id_fields)
-        cache_key = (adset_id, self._normalized_key(ad_external_id), self._normalized_key(ad_name))
+        cache_key = (
+            adset_id,
+            self._normalized_key(ad_external_id),
+            self._normalized_key(ad_name),
+        )
 
         if cache_key[1] == "" and cache_key[2] == "":
-            warning = (
-                f"Row {row_index}: unable to determine ad — provide column_map.ad_map or ensure ad columns exist."
-            )
-            warnings.append(warning)
-            log_event(
-                "ROW_SKIPPED_AD_UNRESOLVED",
-                handler=self.__class__.__name__,
-                row_index=row_index,
-                raw=values,
-            )
-            if context.fail_fast:
-                raise ValueError("Unable to resolve ad for row")
-            return None
+            surrogate_name = self._fallback_ad_name(values, row_index, ad_name)
+            if surrogate_name:
+                ad_name = surrogate_name
+                cache_key = (adset_id, "", self._normalized_key(ad_name))
+                log_event(
+                    "ROW_AD_SURROGATE_ASSIGNED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    surrogate_name=surrogate_name,
+                )
+            else:
+                warning = (
+                    f"Row {row_index}: unable to determine ad — provide column_map.ad_map or ensure ad columns exist."
+                )
+                warnings.append(warning)
+                log_event(
+                    "ROW_SKIPPED_AD_UNRESOLVED",
+                    handler=self.__class__.__name__,
+                    row_index=row_index,
+                    raw=values,
+                )
+                if context.fail_fast:
+                    raise ValueError("Unable to resolve ad for row")
+                return None
 
         if cache_key in cache:
             return cache[cache_key]
@@ -832,12 +956,18 @@ class TikTokDMAHandler(MarketingHandler):
         "frequency": MetricSpec("frequency", parse_decimal),
     }
 
-
 class TikTokRegionHandler(MarketingHandler):
     file_patterns = ("tiktok_by_region",)
     required_columns = ("subregion", "by_day", "cost")
     date_column = "by_day"
     region_column = "subregion"
+    require_adset_inputs = False
+    require_ad_inputs = False
+    # Region extracts do not expose ad group or ad level identifiers.  Treat the
+    # subregion label as the ad set/ad surrogate so the handler can still create
+    # dimension rows (scoped to the campaign) and persist fact records.
+    adset_name_fields = ("subregion", "campaign_name")
+    ad_name_fields = ("subregion", "campaign_name")
     metric_specs = {
         "spend": MetricSpec("cost", parse_decimal),
         "impressions": MetricSpec("impressions", parse_int),
@@ -845,6 +975,23 @@ class TikTokRegionHandler(MarketingHandler):
         "conversions": MetricSpec("conversions", parse_int),
         "frequency": MetricSpec("frequency", parse_decimal),
     }
+
+    def _region_surrogate(self, values: dict[str, str], row_index: int) -> str:
+        for field in ("subregion", "campaign_name"):
+            candidate = (values.get(field, "") or "").strip()
+            if candidate:
+                return candidate
+        return f"region_row_{row_index}"
+
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        return self._region_surrogate(values, row_index)
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        return adset_name or self._region_surrogate(values, row_index)
 
 
 class TikTokAdsHandler(MarketingHandler):
