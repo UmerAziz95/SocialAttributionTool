@@ -187,6 +187,12 @@ class MarketingHandler(IngestionHandler):
         total_prepared = 0
         total_written = 0
         batch_size = max(1, context.batch_size)
+        # asyncpg limits bind parameters per statement (~32k). Constrain the
+        # per-statement batch size once we know how many columns each row
+        # carries so we never exceed the driver limit even if callers pass a
+        # very large batch_size.
+        max_rows_per_statement: int | None = None
+        effective_batch_size = batch_size
         first_payload_sample: dict | None = None
         warnings: list[str] = []
 
@@ -438,10 +444,17 @@ class MarketingHandler(IngestionHandler):
             if first_payload_sample is None:
                 first_payload_sample = row_payload
 
+            if max_rows_per_statement is None:
+                # Use a conservative ceiling to keep well under the 32k
+                # parameter cap: params_per_row * rows_per_statement <= 32000
+                params_per_row = max(1, len(row_payload))
+                max_rows_per_statement = max(1, 32000 // params_per_row)
+                effective_batch_size = min(batch_size, max_rows_per_statement)
+
             total_prepared += 1
             if not context.dry_run:
                 payload_chunk.append(row_payload)
-                if len(payload_chunk) >= batch_size:
+                if len(payload_chunk) >= effective_batch_size:
                     await flush_chunk()
             date_ids.add(date_id)
             if dma_id is not None:
