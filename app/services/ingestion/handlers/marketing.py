@@ -183,7 +183,17 @@ class MarketingHandler(IngestionHandler):
             currency_code=currency_code,
         )
 
-        payload: list[dict] = []
+        payload_chunk: list[dict] = []
+        total_prepared = 0
+        total_written = 0
+        batch_size = max(1, context.batch_size)
+        # asyncpg limits bind parameters per statement (~32k). Constrain the
+        # per-statement batch size once we know how many columns each row
+        # carries so we never exceed the driver limit even if callers pass a
+        # very large batch_size.
+        max_rows_per_statement: int | None = None
+        effective_batch_size = batch_size
+        first_payload_sample: dict | None = None
         warnings: list[str] = []
 
         dma_ids: set[int] = set()
@@ -202,6 +212,40 @@ class MarketingHandler(IngestionHandler):
         ad_cache: dict[tuple[int, str, str], int] = {}
 
         skipped_rows = 0
+
+        async def flush_chunk() -> None:
+            nonlocal total_written
+            if not payload_chunk:
+                return
+
+            upsert_stmt = pg_insert(FactMarketingDaily).values(payload_chunk)
+            update_fields = {
+                "attribution_id": upsert_stmt.excluded.attribution_id,
+                "country_id": upsert_stmt.excluded.country_id,
+                "region_id": upsert_stmt.excluded.region_id,
+                "dma_id": upsert_stmt.excluded.dma_id,
+                "currency_code": upsert_stmt.excluded.currency_code,
+                "spend": upsert_stmt.excluded.spend,
+                "impressions": upsert_stmt.excluded.impressions,
+                "clicks": upsert_stmt.excluded.clicks,
+                "conversions": upsert_stmt.excluded.conversions,
+                "conversion_value": upsert_stmt.excluded.conversion_value,
+                "video_view_time": upsert_stmt.excluded.video_view_time,
+                "frequency": upsert_stmt.excluded.frequency,
+                "reach": upsert_stmt.excluded.reach,
+                "add_to_cart": upsert_stmt.excluded.add_to_cart,
+            }
+
+            await session.execute(
+                upsert_stmt.on_conflict_do_update(
+                    constraint="ux_fact_marketing_daily_grain",
+                    set_=update_fields,
+                )
+            )
+            await session.commit()
+
+            total_written += len(payload_chunk)
+            payload_chunk.clear()
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
@@ -382,22 +426,36 @@ class MarketingHandler(IngestionHandler):
                 parsed_value = spec.parser(values.get(spec.column, ""))
                 metrics[target_column] = parsed_value
 
-            payload.append(
-                {
-                    "platform_id": platform_id,
-                    "account_id": account_id,
-                    "campaign_id": campaign_id,
-                    "adset_id": adset_id,
-                    "ad_id": ad_id,
-                    "date_id": date_id,
-                    "attribution_id": attribution_id,
-                    "dma_id": dma_id,
-                    "country_id": country_id,
-                    "region_id": region_id,
-                    "currency_code": currency_code,
-                    **metrics,
-                }
-            )
+            row_payload = {
+                "platform_id": platform_id,
+                "account_id": account_id,
+                "campaign_id": campaign_id,
+                "adset_id": adset_id,
+                "ad_id": ad_id,
+                "date_id": date_id,
+                "attribution_id": attribution_id,
+                "dma_id": dma_id,
+                "country_id": country_id,
+                "region_id": region_id,
+                "currency_code": currency_code,
+                **metrics,
+            }
+
+            if first_payload_sample is None:
+                first_payload_sample = row_payload
+
+            if max_rows_per_statement is None:
+                # Use a conservative ceiling to keep well under the 32k
+                # parameter cap: params_per_row * rows_per_statement <= 32000
+                params_per_row = max(1, len(row_payload))
+                max_rows_per_statement = max(1, 32000 // params_per_row)
+                effective_batch_size = min(batch_size, max_rows_per_statement)
+
+            total_prepared += 1
+            if not context.dry_run:
+                payload_chunk.append(row_payload)
+                if len(payload_chunk) >= effective_batch_size:
+                    await flush_chunk()
             date_ids.add(date_id)
             if dma_id is not None:
                 dma_ids.add(dma_id)
@@ -430,14 +488,14 @@ class MarketingHandler(IngestionHandler):
         log_event(
             "PAYLOAD_PREPARED",
             handler=self.__class__.__name__,
-            rows_prepared=len(payload),
+            rows_prepared=total_prepared,
             rows_skipped=skipped_rows,
             warnings_count=len(warnings),
-            sample_row=payload[0] if payload else None,
+            sample_row=first_payload_sample,
         )
 
-        if context.dry_run or not payload:
-            if not payload and not context.dry_run:
+        if context.dry_run or not total_prepared:
+            if not total_prepared and not context.dry_run:
                 log_event(
                     "MARKETING_NO_ROWS",
                     handler=self.__class__.__name__,
@@ -450,16 +508,16 @@ class MarketingHandler(IngestionHandler):
                 "DRY_RUN_SUMMARY" if context.dry_run else "NO_DATA_SUMMARY",
                 handler=self.__class__.__name__,
                 rows_considered=len(normalized.rows),
-                payload_rows=len(payload),
+                payload_rows=total_prepared,
                 skipped=skipped_rows,
                 warnings=warnings,
             )
-            result.inserted = len(payload)
+            result.inserted = total_prepared
             result.finished_at = datetime.utcnow()
             result.status = "success"
             if context.dry_run:
                 result.summary = (
-                    f"Dry run prepared {len(payload)} marketing rows for fact_marketing_daily; "
+                    f"Dry run prepared {total_prepared} marketing rows for fact_marketing_daily; "
                     f"skipped {skipped_rows}."
                 )
             else:
@@ -471,7 +529,7 @@ class MarketingHandler(IngestionHandler):
         log_event(
             "DATABASE_WRITE_BEGIN",
             handler=self.__class__.__name__,
-            payload_rows=len(payload),
+            payload_rows=total_prepared,
             unique_dates=len(date_ids),
             unique_dmas=len(dma_ids),
             includes_null_dma=include_null_dma,
@@ -481,32 +539,8 @@ class MarketingHandler(IngestionHandler):
             includes_null_country=include_null_country,
         )
 
-        if payload:
-            upsert_stmt = pg_insert(FactMarketingDaily).values(payload)
-            update_fields = {
-                "attribution_id": upsert_stmt.excluded.attribution_id,
-                "country_id": upsert_stmt.excluded.country_id,
-                "region_id": upsert_stmt.excluded.region_id,
-                "dma_id": upsert_stmt.excluded.dma_id,
-                "currency_code": upsert_stmt.excluded.currency_code,
-                "spend": upsert_stmt.excluded.spend,
-                "impressions": upsert_stmt.excluded.impressions,
-                "clicks": upsert_stmt.excluded.clicks,
-                "conversions": upsert_stmt.excluded.conversions,
-                "conversion_value": upsert_stmt.excluded.conversion_value,
-                "video_view_time": upsert_stmt.excluded.video_view_time,
-                "frequency": upsert_stmt.excluded.frequency,
-                "reach": upsert_stmt.excluded.reach,
-                "add_to_cart": upsert_stmt.excluded.add_to_cart,
-            }
-
-            await session.execute(
-                upsert_stmt.on_conflict_do_update(
-                    constraint="ux_fact_marketing_daily_grain",
-                    set_=update_fields,
-                )
-            )
-        await session.commit()
+        if payload_chunk:
+            await flush_chunk()
 
         if date_labels:
             date_range = (min(date_labels), max(date_labels))
@@ -517,30 +551,7 @@ class MarketingHandler(IngestionHandler):
             "MARKETING_FACT_SUMMARY",
             handler=self.__class__.__name__,
             file=context.file_path,
-            rows_inserted=len(payload),
-            rows_skipped=skipped_rows,
-            platform_id=platform_id,
-            account_id=account_id,
-            campaigns=len(campaign_ids),
-            adsets=len(adset_ids),
-            ads=len(ad_ids),
-            dma=len(dma_ids),
-            regions=len(region_ids),
-            countries=len(country_ids),
-            date_range=date_range,
-            currency_code=currency_code,
-        )
-
-        if date_labels:
-            date_range = (min(date_labels), max(date_labels))
-        else:
-            date_range = None
-
-        log_event(
-            "MARKETING_FACT_SUMMARY",
-            handler=self.__class__.__name__,
-            file=context.file_path,
-            rows_inserted=len(payload),
+            rows_inserted=total_written,
             rows_skipped=skipped_rows,
             platform_id=platform_id,
             account_id=account_id,
@@ -557,16 +568,16 @@ class MarketingHandler(IngestionHandler):
         log_event(
             "DATABASE_WRITE_COMPLETE",
             handler=self.__class__.__name__,
-            inserted=len(payload),
+            inserted=total_written,
             skipped=skipped_rows,
             warnings=warnings,
         )
 
         result.status = "success"
-        result.inserted = len(payload)
+        result.inserted = total_written
         result.finished_at = datetime.utcnow()
         result.summary = (
-            f"Inserted {len(payload)} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
+            f"Inserted {total_written} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
         )
         return result
 
