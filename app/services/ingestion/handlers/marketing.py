@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Iterable
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -190,6 +190,7 @@ class MarketingHandler(IngestionHandler):
         )
 
         payload_chunk: list[dict] = []
+        update_chunk: list[dict] = []
         total_prepared = 0
         total_written = 0
         batch_size = max(1, context.batch_size)
@@ -214,7 +215,6 @@ class MarketingHandler(IngestionHandler):
         adset_ids: set[int] = set()
         ad_ids: set[int] = set()
         total_updated = 0
-        updates_since_commit = 0
         campaign_cache: dict[tuple[int, str, str], int] = {}
         adset_cache: dict[tuple[int, str, str], int] = {}
         ad_cache: dict[tuple[int, str, str], int] = {}
@@ -259,29 +259,74 @@ class MarketingHandler(IngestionHandler):
             total_written += len(payload_chunk)
             payload_chunk.clear()
 
+        async def flush_updates() -> None:
+            nonlocal total_updated
+            if not update_chunk:
+                return
+
+            update_stmt = pg_insert(FactMarketingDaily).values(update_chunk)
+            update_fields = {
+                "attribution_id": update_stmt.excluded.attribution_id,
+                "country_id": update_stmt.excluded.country_id,
+                "region_id": update_stmt.excluded.region_id,
+                "dma_id": update_stmt.excluded.dma_id,
+                "currency_code": update_stmt.excluded.currency_code,
+                "spend": update_stmt.excluded.spend,
+                "impressions": update_stmt.excluded.impressions,
+                "clicks": update_stmt.excluded.clicks,
+                "conversions": update_stmt.excluded.conversions,
+                "conversion_value": update_stmt.excluded.conversion_value,
+                "video_view_time": update_stmt.excluded.video_view_time,
+                "frequency": update_stmt.excluded.frequency,
+                "reach": update_stmt.excluded.reach,
+                "add_to_cart": update_stmt.excluded.add_to_cart,
+            }
+
+            await session.execute(
+                update_stmt.on_conflict_do_update(
+                    index_elements=[FactMarketingDaily.fact_id],
+                    set_=update_fields,
+                )
+            )
+            await session.commit()
+
+            total_updated += len(update_chunk)
+            update_chunk.clear()
+
         async def resolve_existing_fact(
-            key: tuple[int, int, int, int, int, int]
+            key: tuple[int, int, int, int, int, int],
+            *,
+            prefer_dma_region_backfill: bool = False,
         ) -> tuple[int, int | None, int | None, int | None] | None:
             if key in fact_cache:
                 return fact_cache[key]
 
-            stmt = (
-                select(
-                    FactMarketingDaily.fact_id,
-                    FactMarketingDaily.dma_id,
-                    FactMarketingDaily.region_id,
-                    FactMarketingDaily.country_id,
-                )
-                .where(
-                    FactMarketingDaily.platform_id == key[0],
-                    FactMarketingDaily.account_id == key[1],
-                    FactMarketingDaily.campaign_id == key[2],
-                    FactMarketingDaily.adset_id == key[3],
-                    FactMarketingDaily.ad_id == key[4],
-                    FactMarketingDaily.date_id == key[5],
-                )
-                .limit(1)
+            stmt = select(
+                FactMarketingDaily.fact_id,
+                FactMarketingDaily.dma_id,
+                FactMarketingDaily.region_id,
+                FactMarketingDaily.country_id,
+            ).where(
+                FactMarketingDaily.platform_id == key[0],
+                FactMarketingDaily.account_id == key[1],
+                FactMarketingDaily.campaign_id == key[2],
+                FactMarketingDaily.adset_id == key[3],
+                FactMarketingDaily.ad_id == key[4],
+                FactMarketingDaily.date_id == key[5],
             )
+
+            if prefer_dma_region_backfill:
+                # When region-based files arrive after DMA-based rows, prefer the
+                # existing fact that already holds a DMA (and is missing a region)
+                # so we enrich the original record instead of inserting a separate
+                # region-only fact.
+                stmt = stmt.order_by(
+                    FactMarketingDaily.region_id.is_(None).desc(),
+                    FactMarketingDaily.dma_id.isnot(None).desc(),
+                    FactMarketingDaily.fact_id.asc(),
+                )
+
+            stmt = stmt.limit(1)
 
             existing = (await session.execute(stmt)).first()
             if existing:
@@ -478,7 +523,11 @@ class MarketingHandler(IngestionHandler):
                 ad_id,
                 date_id,
             )
-            existing_fact = await resolve_existing_fact(fact_key)
+            existing_fact = await resolve_existing_fact(
+                fact_key,
+                prefer_dma_region_backfill=self.region_column is not None
+                and self.dma_column is None,
+            )
             if existing_fact:
                 _, existing_dma_id, existing_region_id, existing_country_id = existing_fact
                 dma_id = dma_id if dma_id is not None else existing_dma_id
@@ -520,26 +569,11 @@ class MarketingHandler(IngestionHandler):
             total_prepared += 1
 
             if existing_fact:
-                update_values = {
-                    **metrics,
-                    "dma_id": dma_id,
-                    "region_id": region_id,
-                    "country_id": country_id,
-                    "currency_code": currency_code,
-                    "attribution_id": attribution_id,
-                }
-
-                await session.execute(
-                    update(FactMarketingDaily)
-                    .where(FactMarketingDaily.fact_id == existing_fact[0])
-                    .values(**update_values)
-                )
-
-                total_updated += 1
-                updates_since_commit += 1
-                if updates_since_commit >= effective_batch_size:
-                    await session.commit()
-                    updates_since_commit = 0
+                row_payload["fact_id"] = existing_fact[0]
+                if not context.dry_run:
+                    update_chunk.append(row_payload)
+                    if len(update_chunk) >= effective_batch_size:
+                        await flush_updates()
 
                 date_ids.add(date_id)
                 if dma_id is not None:
@@ -659,8 +693,7 @@ class MarketingHandler(IngestionHandler):
         if payload_chunk:
             await flush_chunk()
 
-        if updates_since_commit:
-            await session.commit()
+        await flush_updates()
 
         if date_labels:
             date_range = (min(date_labels), max(date_labels))
