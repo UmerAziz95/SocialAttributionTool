@@ -222,7 +222,17 @@ class MarketingHandler(IngestionHandler):
         adset_cache: dict[tuple[int, str, str], int] = {}
         ad_cache: dict[tuple[int, str, str], int] = {}
         fact_cache: dict[
-            tuple[int, int, int, int, int, int],
+            tuple[
+                int,
+                int,
+                int,
+                int,
+                int,
+                int,
+                int | None,
+                int | None,
+                int | None,
+            ],
             tuple[int, int | None, int | None, int | None] | None,
         ] = {}
 
@@ -305,6 +315,12 @@ class MarketingHandler(IngestionHandler):
             rows_to_upsert = list(deduped.values())
             await _execute_insert_rows(rows_to_upsert)
 
+            log_event(
+                "MARKETING_PAYLOAD_FLUSHED",
+                handler=self.__class__.__name__,
+                rows=len(rows_to_upsert),
+            )
+
             total_written += len(rows_to_upsert)
             payload_buffer.clear()
 
@@ -369,45 +385,95 @@ class MarketingHandler(IngestionHandler):
                     )
                     await session.commit()
 
+            log_event(
+                "MARKETING_UPDATES_FLUSHED",
+                handler=self.__class__.__name__,
+                rows=len(rows_to_update),
+            )
+
             total_updated += len(rows_to_update)
             update_buffer.clear()
 
         async def resolve_existing_fact(
-            key: tuple[int, int, int, int, int, int],
+            key: tuple[
+                int,
+                int,
+                int,
+                int,
+                int,
+                int,
+                int | None,
+                int | None,
+                int | None,
+            ],
             *,
             prefer_dma_region_backfill: bool = False,
         ) -> tuple[int, int | None, int | None, int | None] | None:
             if key in fact_cache:
                 return fact_cache[key]
 
-            stmt = select(
+            (
+                platform_id,
+                account_id,
+                campaign_id,
+                adset_id,
+                ad_id,
+                date_id,
+                dma_id,
+                region_id,
+                country_id,
+            ) = key
+
+            base_stmt = select(
                 FactMarketingDaily.fact_id,
                 FactMarketingDaily.dma_id,
                 FactMarketingDaily.region_id,
                 FactMarketingDaily.country_id,
             ).where(
-                FactMarketingDaily.platform_id == key[0],
-                FactMarketingDaily.account_id == key[1],
-                FactMarketingDaily.campaign_id == key[2],
-                FactMarketingDaily.adset_id == key[3],
-                FactMarketingDaily.ad_id == key[4],
-                FactMarketingDaily.date_id == key[5],
+                FactMarketingDaily.platform_id == platform_id,
+                FactMarketingDaily.account_id == account_id,
+                FactMarketingDaily.campaign_id == campaign_id,
+                FactMarketingDaily.adset_id == adset_id,
+                FactMarketingDaily.ad_id == ad_id,
+                FactMarketingDaily.date_id == date_id,
             )
 
+            exact_stmt = base_stmt
+            if dma_id is not None:
+                exact_stmt = exact_stmt.where(FactMarketingDaily.dma_id == dma_id)
+            if region_id is not None:
+                exact_stmt = exact_stmt.where(FactMarketingDaily.region_id == region_id)
+            if country_id is not None:
+                exact_stmt = exact_stmt.where(FactMarketingDaily.country_id == country_id)
+
+            exact_stmt = exact_stmt.order_by(FactMarketingDaily.fact_id.asc()).limit(1)
+            existing = (await session.execute(exact_stmt)).first()
+            if existing:
+                fact_cache[key] = (
+                    existing.fact_id,
+                    existing.dma_id,
+                    existing.region_id,
+                    existing.country_id,
+                )
+                return fact_cache[key]
+
+            fallback_stmt = base_stmt
             if prefer_dma_region_backfill:
                 # When region-based files arrive after DMA-based rows, prefer the
                 # existing fact that already holds a DMA (and is missing a region)
                 # so we enrich the original record instead of inserting a separate
                 # region-only fact.
-                stmt = stmt.order_by(
+                fallback_stmt = fallback_stmt.order_by(
                     FactMarketingDaily.region_id.is_(None).desc(),
                     FactMarketingDaily.dma_id.isnot(None).desc(),
                     FactMarketingDaily.fact_id.asc(),
                 )
+            else:
+                fallback_stmt = fallback_stmt.order_by(FactMarketingDaily.fact_id.asc())
 
-            stmt = stmt.limit(1)
+            fallback_stmt = fallback_stmt.limit(1)
 
-            existing = (await session.execute(stmt)).first()
+            existing = (await session.execute(fallback_stmt)).first()
             if existing:
                 fact_cache[key] = (
                     existing.fact_id,
@@ -601,6 +667,9 @@ class MarketingHandler(IngestionHandler):
                 adset_id,
                 ad_id,
                 date_id,
+                dma_id,
+                region_id,
+                country_id,
             )
             existing_fact = await resolve_existing_fact(
                 fact_key,
@@ -780,7 +849,7 @@ class MarketingHandler(IngestionHandler):
             includes_null_country=include_null_country,
         )
 
-        if payload_chunk:
+        if payload_buffer:
             await flush_chunk()
 
         await flush_updates()
