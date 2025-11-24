@@ -837,7 +837,7 @@ class MarketingHandler(IngestionHandler):
             includes_null_country=include_null_country,
         )
 
-        if payload_chunk:
+        if payload_buffer:
             await flush_chunk()
 
         await flush_updates()
