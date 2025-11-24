@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     ENV: str = "dev"
     DEBUG: bool = True
 
+    # Control verbose SQL echo logging separately from the global DEBUG flag so
+    # ingest runs do not flood the console unless explicitly requested.
+    SQLALCHEMY_ECHO: bool = False
+
     DATABASE_URL: str = Field(
         ...,
         description="Database connection string in SQLAlchemy async format.",
