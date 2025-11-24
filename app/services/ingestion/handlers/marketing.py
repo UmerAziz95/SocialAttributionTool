@@ -54,9 +54,14 @@ class MarketingHandler(IngestionHandler):
     )
     campaign_name_fields: tuple[str, ...] = ("campaign_name",)
     campaign_external_id_fields: tuple[str, ...] = ("campaign_id", "external_campaign_id")
-    adset_name_fields: tuple[str, ...] = ("adset_name", "ad_group_name")
+    adset_name_fields: tuple[str, ...] = (
+        "adset_name",
+        "ad_set_name",
+        "ad_group_name",
+    )
     adset_external_id_fields: tuple[str, ...] = (
         "adset_id",
+        "ad_set_id",
         "ad_group_id",
         "external_adset_id",
     )
