@@ -177,7 +177,8 @@ class FileIngestionService:
             result.status = status
             result.summary = (
                 f"Handler failed: {error_message}" if error_message else "Handler failed."
-            )  
+            )
+            await session.rollback()
             log_event(
                 "INGESTION_ERROR",
                 level=logging.ERROR,

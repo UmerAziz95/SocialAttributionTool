@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable, Iterable
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,6 +228,53 @@ class MarketingHandler(IngestionHandler):
 
         skipped_rows = 0
 
+        async def _execute_insert_rows(rows_to_upsert: list[dict]) -> None:
+            upsert_stmt = pg_insert(FactMarketingDaily).values(rows_to_upsert)
+            update_fields = {
+                "attribution_id": upsert_stmt.excluded.attribution_id,
+                "country_id": upsert_stmt.excluded.country_id,
+                "region_id": upsert_stmt.excluded.region_id,
+                "dma_id": upsert_stmt.excluded.dma_id,
+                "currency_code": upsert_stmt.excluded.currency_code,
+                "spend": upsert_stmt.excluded.spend,
+                "impressions": upsert_stmt.excluded.impressions,
+                "clicks": upsert_stmt.excluded.clicks,
+                "conversions": upsert_stmt.excluded.conversions,
+                "conversion_value": upsert_stmt.excluded.conversion_value,
+                "video_view_time": upsert_stmt.excluded.video_view_time,
+                "frequency": upsert_stmt.excluded.frequency,
+                "reach": upsert_stmt.excluded.reach,
+                "add_to_cart": upsert_stmt.excluded.add_to_cart,
+            }
+
+            try:
+                await session.execute(
+                    upsert_stmt.on_conflict_do_update(
+                        constraint="ux_fact_marketing_daily_grain",
+                        set_=update_fields,
+                    )
+                )
+                await session.commit()
+            except IntegrityError as exc:  # noqa: PERF203
+                await session.rollback()
+                log_event(
+                    "INSERT_BATCH_RETRY",
+                    handler=self.__class__.__name__,
+                    reason="integrity_error",
+                    error=str(exc),
+                    rows=len(rows_to_upsert),
+                )
+
+                for row in rows_to_upsert:
+                    single_stmt = pg_insert(FactMarketingDaily).values(row)
+                    await session.execute(
+                        single_stmt.on_conflict_do_update(
+                            constraint="ux_fact_marketing_daily_grain",
+                            set_=update_fields,
+                        )
+                    )
+                    await session.commit()
+
         async def flush_chunk() -> None:
             nonlocal total_written
             if not payload_buffer:
@@ -255,31 +303,7 @@ class MarketingHandler(IngestionHandler):
                 deduped[dedupe_key] = row
 
             rows_to_upsert = list(deduped.values())
-            upsert_stmt = pg_insert(FactMarketingDaily).values(rows_to_upsert)
-            update_fields = {
-                "attribution_id": upsert_stmt.excluded.attribution_id,
-                "country_id": upsert_stmt.excluded.country_id,
-                "region_id": upsert_stmt.excluded.region_id,
-                "dma_id": upsert_stmt.excluded.dma_id,
-                "currency_code": upsert_stmt.excluded.currency_code,
-                "spend": upsert_stmt.excluded.spend,
-                "impressions": upsert_stmt.excluded.impressions,
-                "clicks": upsert_stmt.excluded.clicks,
-                "conversions": upsert_stmt.excluded.conversions,
-                "conversion_value": upsert_stmt.excluded.conversion_value,
-                "video_view_time": upsert_stmt.excluded.video_view_time,
-                "frequency": upsert_stmt.excluded.frequency,
-                "reach": upsert_stmt.excluded.reach,
-                "add_to_cart": upsert_stmt.excluded.add_to_cart,
-            }
-
-            await session.execute(
-                upsert_stmt.on_conflict_do_update(
-                    constraint="ux_fact_marketing_daily_grain",
-                    set_=update_fields,
-                )
-            )
-            await session.commit()
+            await _execute_insert_rows(rows_to_upsert)
 
             total_written += len(rows_to_upsert)
             payload_buffer.clear()
@@ -317,13 +341,33 @@ class MarketingHandler(IngestionHandler):
                 "add_to_cart": update_stmt.excluded.add_to_cart,
             }
 
-            await session.execute(
-                update_stmt.on_conflict_do_update(
-                    index_elements=[FactMarketingDaily.fact_id],
-                    set_=update_fields,
+            try:
+                await session.execute(
+                    update_stmt.on_conflict_do_update(
+                        index_elements=[FactMarketingDaily.fact_id],
+                        set_=update_fields,
+                    )
                 )
-            )
-            await session.commit()
+                await session.commit()
+            except IntegrityError as exc:  # noqa: PERF203
+                await session.rollback()
+                log_event(
+                    "UPDATE_BATCH_RETRY",
+                    handler=self.__class__.__name__,
+                    reason="integrity_error",
+                    error=str(exc),
+                    rows=len(rows_to_update),
+                )
+
+                for row in rows_to_update:
+                    single_update = pg_insert(FactMarketingDaily).values(row)
+                    await session.execute(
+                        single_update.on_conflict_do_update(
+                            index_elements=[FactMarketingDaily.fact_id],
+                            set_=update_fields,
+                        )
+                    )
+                    await session.commit()
 
             total_updated += len(rows_to_update)
             update_buffer.clear()
