@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Iterable
 
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -212,9 +213,15 @@ class MarketingHandler(IngestionHandler):
         campaign_ids: set[int] = set()
         adset_ids: set[int] = set()
         ad_ids: set[int] = set()
+        total_updated = 0
+        updates_since_commit = 0
         campaign_cache: dict[tuple[int, str, str], int] = {}
         adset_cache: dict[tuple[int, str, str], int] = {}
         ad_cache: dict[tuple[int, str, str], int] = {}
+        fact_cache: dict[
+            tuple[int, int, int, int, int, int],
+            tuple[int, int | None, int | None, int | None] | None,
+        ] = {}
 
         skipped_rows = 0
 
@@ -251,6 +258,43 @@ class MarketingHandler(IngestionHandler):
 
             total_written += len(payload_chunk)
             payload_chunk.clear()
+
+        async def resolve_existing_fact(
+            key: tuple[int, int, int, int, int, int]
+        ) -> tuple[int, int | None, int | None, int | None] | None:
+            if key in fact_cache:
+                return fact_cache[key]
+
+            stmt = (
+                select(
+                    FactMarketingDaily.fact_id,
+                    FactMarketingDaily.dma_id,
+                    FactMarketingDaily.region_id,
+                    FactMarketingDaily.country_id,
+                )
+                .where(
+                    FactMarketingDaily.platform_id == key[0],
+                    FactMarketingDaily.account_id == key[1],
+                    FactMarketingDaily.campaign_id == key[2],
+                    FactMarketingDaily.adset_id == key[3],
+                    FactMarketingDaily.ad_id == key[4],
+                    FactMarketingDaily.date_id == key[5],
+                )
+                .limit(1)
+            )
+
+            existing = (await session.execute(stmt)).first()
+            if existing:
+                fact_cache[key] = (
+                    existing.fact_id,
+                    existing.dma_id,
+                    existing.region_id,
+                    existing.country_id,
+                )
+            else:
+                fact_cache[key] = None
+
+            return fact_cache[key]
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
@@ -426,6 +470,23 @@ class MarketingHandler(IngestionHandler):
                         if existing_region:
                             country_id = existing_region.country_id
 
+            fact_key = (
+                platform_id,
+                account_id,
+                campaign_id,
+                adset_id,
+                ad_id,
+                date_id,
+            )
+            existing_fact = await resolve_existing_fact(fact_key)
+            if existing_fact:
+                _, existing_dma_id, existing_region_id, existing_country_id = existing_fact
+                dma_id = dma_id if dma_id is not None else existing_dma_id
+                if region_id is None:
+                    region_id = existing_region_id
+                if country_id is None:
+                    country_id = existing_country_id
+
             metrics: dict[str, object] = {}
             for target_column, spec in self.metric_specs.items():
                 parsed_value = spec.parser(values.get(spec.column, ""))
@@ -457,6 +518,57 @@ class MarketingHandler(IngestionHandler):
                 effective_batch_size = min(batch_size, max_rows_per_statement)
 
             total_prepared += 1
+
+            if existing_fact:
+                update_values = {
+                    **metrics,
+                    "dma_id": dma_id,
+                    "region_id": region_id,
+                    "country_id": country_id,
+                    "currency_code": currency_code,
+                    "attribution_id": attribution_id,
+                }
+
+                await session.execute(
+                    update(FactMarketingDaily)
+                    .where(FactMarketingDaily.fact_id == existing_fact[0])
+                    .values(**update_values)
+                )
+
+                total_updated += 1
+                updates_since_commit += 1
+                if updates_since_commit >= effective_batch_size:
+                    await session.commit()
+                    updates_since_commit = 0
+
+                date_ids.add(date_id)
+                if dma_id is not None:
+                    dma_ids.add(dma_id)
+                elif self.dma_column:
+                    include_null_dma = True
+                if region_id is not None:
+                    region_ids.add(region_id)
+                else:
+                    include_null_region = include_null_region or bool(self.region_column)
+                if country_id is not None:
+                    country_ids.add(country_id)
+                else:
+                    include_null_country = include_null_country or bool(
+                        self.region_column
+                    )
+                campaign_ids.add(campaign_id)
+                adset_ids.add(adset_id)
+                ad_ids.add(ad_id)
+                log_event(
+                    "ROW_UPDATED_EXISTING_FACT",
+                    handler=self.__class__.__name__,
+                    row_index=index,
+                    fact_id=existing_fact[0],
+                    dma_id=dma_id,
+                    region_id=region_id,
+                )
+                continue
+
             if not context.dry_run:
                 payload_chunk.append(row_payload)
                 if len(payload_chunk) >= effective_batch_size:
@@ -547,6 +659,9 @@ class MarketingHandler(IngestionHandler):
         if payload_chunk:
             await flush_chunk()
 
+        if updates_since_commit:
+            await session.commit()
+
         if date_labels:
             date_range = (min(date_labels), max(date_labels))
         else:
@@ -557,6 +672,7 @@ class MarketingHandler(IngestionHandler):
             handler=self.__class__.__name__,
             file=context.file_path,
             rows_inserted=total_written,
+            rows_updated=total_updated,
             rows_skipped=skipped_rows,
             platform_id=platform_id,
             account_id=account_id,
@@ -580,9 +696,11 @@ class MarketingHandler(IngestionHandler):
 
         result.status = "success"
         result.inserted = total_written
+        result.updated = total_updated
         result.finished_at = datetime.utcnow()
         result.summary = (
-            f"Inserted {total_written} marketing rows into fact_marketing_daily; skipped {skipped_rows}."
+            f"Inserted {total_written} marketing rows into fact_marketing_daily; "
+            f"updated {total_updated}; skipped {skipped_rows}."
         )
         return result
 
