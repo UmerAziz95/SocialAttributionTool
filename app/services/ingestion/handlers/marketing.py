@@ -189,8 +189,10 @@ class MarketingHandler(IngestionHandler):
             currency_code=currency_code,
         )
 
-        payload_chunk: list[dict] = []
-        update_chunk: list[dict] = []
+        payload_buffer: dict[
+            tuple[int, int, int, int, int, int | None, int | None, int | None], dict
+        ] = {}
+        update_buffer: dict[int, dict] = {}
         total_prepared = 0
         total_written = 0
         batch_size = max(1, context.batch_size)
@@ -227,10 +229,11 @@ class MarketingHandler(IngestionHandler):
 
         async def flush_chunk() -> None:
             nonlocal total_written
-            if not payload_chunk:
+            if not payload_buffer:
                 return
 
-            upsert_stmt = pg_insert(FactMarketingDaily).values(payload_chunk)
+            rows_to_upsert = list(payload_buffer.values())
+            upsert_stmt = pg_insert(FactMarketingDaily).values(rows_to_upsert)
             update_fields = {
                 "attribution_id": upsert_stmt.excluded.attribution_id,
                 "country_id": upsert_stmt.excluded.country_id,
@@ -256,15 +259,16 @@ class MarketingHandler(IngestionHandler):
             )
             await session.commit()
 
-            total_written += len(payload_chunk)
-            payload_chunk.clear()
+            total_written += len(rows_to_upsert)
+            payload_buffer.clear()
 
         async def flush_updates() -> None:
             nonlocal total_updated
-            if not update_chunk:
+            if not update_buffer:
                 return
 
-            update_stmt = pg_insert(FactMarketingDaily).values(update_chunk)
+            rows_to_update = list(update_buffer.values())
+            update_stmt = pg_insert(FactMarketingDaily).values(rows_to_update)
             update_fields = {
                 "attribution_id": update_stmt.excluded.attribution_id,
                 "country_id": update_stmt.excluded.country_id,
@@ -290,8 +294,8 @@ class MarketingHandler(IngestionHandler):
             )
             await session.commit()
 
-            total_updated += len(update_chunk)
-            update_chunk.clear()
+            total_updated += len(rows_to_update)
+            update_buffer.clear()
 
         async def resolve_existing_fact(
             key: tuple[int, int, int, int, int, int],
@@ -571,8 +575,8 @@ class MarketingHandler(IngestionHandler):
             if existing_fact:
                 row_payload["fact_id"] = existing_fact[0]
                 if not context.dry_run:
-                    update_chunk.append(row_payload)
-                    if len(update_chunk) >= effective_batch_size:
+                    update_buffer[row_payload["fact_id"]] = row_payload
+                    if len(update_buffer) >= effective_batch_size:
                         await flush_updates()
 
                 date_ids.add(date_id)
@@ -604,8 +608,19 @@ class MarketingHandler(IngestionHandler):
                 continue
 
             if not context.dry_run:
-                payload_chunk.append(row_payload)
-                if len(payload_chunk) >= effective_batch_size:
+                insert_key = (
+                    row_payload["platform_id"],
+                    row_payload["account_id"],
+                    row_payload["campaign_id"],
+                    row_payload["adset_id"],
+                    row_payload["ad_id"],
+                    row_payload["date_id"],
+                    row_payload.get("dma_id"),
+                    row_payload.get("region_id"),
+                    row_payload.get("country_id"),
+                )
+                payload_buffer[insert_key] = row_payload
+                if len(payload_buffer) >= effective_batch_size:
                     await flush_chunk()
             date_ids.add(date_id)
             if dma_id is not None:
