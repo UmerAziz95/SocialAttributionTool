@@ -103,13 +103,13 @@ class FileIngestionService:
             file=context.file_path,
             normalized=context.normalized_path,
         )
-        log_event(
+        log_event( 
             "STAGE_START",
             stage="validation",
             description="Running handler validation checks",
             handler=handler.__class__.__name__,
             file=context.file_path,
-        )
+        ) 
         await handler.validate(normalized, context)
         log_event(
             "VALIDATION_COMPLETE",
@@ -185,7 +185,7 @@ class FileIngestionService:
                 handler=handler.__class__.__name__,
                 file=context.file_path,
                 error=error_message,
-            )
+            ) 
             log_event(
                 "STAGE_COMPLETE",
                 stage="database_write",
@@ -234,7 +234,7 @@ class FileIngestionService:
             )
             return result
 
-    async def _log_event(
+    async def _log_event(                
         self,
         session: AsyncSession,
         context: IngestionContext,
@@ -253,7 +253,7 @@ class FileIngestionService:
             duration_seconds=duration,
             error=error_message,
             summary=result.summary,
-        )
+        )                         
         log_event(
             "EVENT_LOG_DB_WRITE_BEGIN",
             platform_id=platform_id,
