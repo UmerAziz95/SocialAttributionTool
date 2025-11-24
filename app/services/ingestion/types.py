@@ -10,13 +10,14 @@ from typing import Any
 @dataclass(slots=True)
 class IngestionContext:
     file_path: Path
-    normalized_path: Path
+    normalized_path: Path | None = None
     column_map: dict[str, Any] = field(default_factory=dict)
     currency_code: str | None = None
     attribution: str | None = None
     dry_run: bool = False
     fail_fast: bool = False
     batch_size: int = 500
+    use_existing_normalized: bool = False
 
 
 @dataclass(slots=True)
