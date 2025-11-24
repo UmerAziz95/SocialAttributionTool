@@ -232,7 +232,29 @@ class MarketingHandler(IngestionHandler):
             if not payload_buffer:
                 return
 
-            rows_to_upsert = list(payload_buffer.values())
+            # Guard against any accidental duplicate grains that may have been
+            # queued in the current payload buffer (for example via repeated
+            # rows in the normalized file) so each INSERT .. ON CONFLICT
+            # statement only targets a single row per unique fact grain.
+            deduped: dict[
+                tuple[int, int, int, int, int, int | None, int | None, int | None],
+                dict,
+            ] = {}
+            for row in payload_buffer.values():
+                dedupe_key = (
+                    row["platform_id"],
+                    row["account_id"],
+                    row["campaign_id"],
+                    row["adset_id"],
+                    row["ad_id"],
+                    row["date_id"],
+                    row.get("dma_id"),
+                    row.get("region_id"),
+                    row.get("country_id"),
+                )
+                deduped[dedupe_key] = row
+
+            rows_to_upsert = list(deduped.values())
             upsert_stmt = pg_insert(FactMarketingDaily).values(rows_to_upsert)
             update_fields = {
                 "attribution_id": upsert_stmt.excluded.attribution_id,
@@ -267,7 +289,16 @@ class MarketingHandler(IngestionHandler):
             if not update_buffer:
                 return
 
-            rows_to_update = list(update_buffer.values())
+            # Ensure every upsert-by-fact_id statement contains unique
+            # fact_ids; duplicate fact_ids inside the same statement trigger a
+            # cardinality violation even though the conflict target is
+            # correct.
+            deduped_updates: dict[int, dict] = {}
+            for row in update_buffer.values():
+                fact_id = row["fact_id"]
+                deduped_updates[fact_id] = row
+
+            rows_to_update = list(deduped_updates.values())
             update_stmt = pg_insert(FactMarketingDaily).values(rows_to_update)
             update_fields = {
                 "attribution_id": update_stmt.excluded.attribution_id,
