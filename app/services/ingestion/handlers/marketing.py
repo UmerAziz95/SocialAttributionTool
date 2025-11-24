@@ -315,6 +315,12 @@ class MarketingHandler(IngestionHandler):
             rows_to_upsert = list(deduped.values())
             await _execute_insert_rows(rows_to_upsert)
 
+            log_event(
+                "MARKETING_PAYLOAD_FLUSHED",
+                handler=self.__class__.__name__,
+                rows=len(rows_to_upsert),
+            )
+
             total_written += len(rows_to_upsert)
             payload_buffer.clear()
 
@@ -378,6 +384,12 @@ class MarketingHandler(IngestionHandler):
                         )
                     )
                     await session.commit()
+
+            log_event(
+                "MARKETING_UPDATES_FLUSHED",
+                handler=self.__class__.__name__,
+                rows=len(rows_to_update),
+            )
 
             total_updated += len(rows_to_update)
             update_buffer.clear()
