@@ -49,8 +49,6 @@ coverage.xml
 .python-version
 
 # Environments
-.env
-.env.*
 .venv
 env/
 venv/
@@ -73,9 +71,10 @@ dmypy.json
 .ruff_cache/
 
 # VS Code
-.vscode/
 
 # IDE settings
 .idea/
 .DS_Store
 Thumbs.db
+config.bat
+node_modules
