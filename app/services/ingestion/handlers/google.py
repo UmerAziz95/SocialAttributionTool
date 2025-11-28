@@ -10,14 +10,19 @@ from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
 from app.services.ingestion.logging import log_event
-from app.services.ingestion.parsers import parse_date, parse_decimal
+from app.services.ingestion.parsers import parse_date, parse_decimal, parse_int
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import NormalizationResult
 
 
 class GoogleSpendHandler(IngestionHandler):
     file_patterns = ("google",)
-    required_columns: Iterable[str] = ("spend_by_country_row_only",)
+    required_columns: Iterable[str] = (
+        "day",
+        "campaign",
+        "currency_code",
+        "cost",
+    )
 
     def matches(self, file_path: str) -> bool:  # type: ignore[override]
         return any(pattern in file_path.lower() for pattern in self.file_patterns)
@@ -63,48 +68,42 @@ class GoogleSpendHandler(IngestionHandler):
         )
 
         payload: list[dict] = []
-        current_date_id: int | None = None
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
-            label = values.get("spend_by_country_row_only", "") or ""
-            maybe_date = parse_date(label)
-            if maybe_date:
-                current_date_id = await ensure_date_id(session, maybe_date)
+            day_raw = values.get("day", "")
+            maybe_date = parse_date(day_raw)
+            if not maybe_date:
+                result.warnings.append(
+                    f"Row {index}: invalid or missing date '{day_raw}'"
+                )
+                result.skipped += 1
                 log_event(
-                    "GOOGLE_SECTION_DATE",
+                    "GOOGLE_ROW_SKIPPED_BAD_DATE",
                     handler=self.__class__.__name__,
                     row_index=index,
-                    label=label,
-                    date=str(maybe_date),
-                    date_id=current_date_id,
+                    raw_date=day_raw,
                 )
                 continue
 
-            spend = parse_decimal(values.get("unnamed_1", ""))
+            date_id = await ensure_date_id(session, maybe_date)
+            spend = parse_decimal(values.get("cost", ""))
             if spend is None:
+                result.warnings.append(
+                    f"Row {index}: missing spend in 'cost' column"
+                )
+                result.skipped += 1
                 log_event(
                     "GOOGLE_ROW_SKIPPED_NO_SPEND",
                     handler=self.__class__.__name__,
                     row_index=index,
-                    label=label,
-                )
-                continue
-            if current_date_id is None:
-                result.warnings.append(
-                    f"Row {index}: no reporting date detected before '{label}' — ensure the file lists a date header row."
-                )
-                result.skipped += 1
-                log_event(
-                    "GOOGLE_ROW_SKIPPED_NO_DATE",
-                    handler=self.__class__.__name__,
-                    row_index=index,
-                    label=label,
                 )
                 continue
 
-            region_id = resolver.resolve_mapping("region_map", label)
-            dma_id = resolver.resolve_mapping("dma_map", label)
+            region_label = values.get("region_matched", "")
+            dma_label = values.get("dma_region_matched", "")
+            country_label = values.get("countryterritory_matched", "")
+
             payload.append(
                 {
                     "platform_id": platform_id,
@@ -112,22 +111,27 @@ class GoogleSpendHandler(IngestionHandler):
                     "campaign_id": campaign_id,
                     "adset_id": adset_id,
                     "ad_id": ad_id,
-                    "date_id": current_date_id,
-                    "region_id": region_id,
-                    "dma_id": dma_id,
+                    "date_id": date_id,
+                    "region_id": resolver.resolve_mapping("region_map", region_label),
+                    "dma_id": resolver.resolve_mapping("dma_map", dma_label),
+                    "country_id": resolver.resolve_mapping("country_map", country_label),
                     "attribution_id": attribution_id,
-                    "currency_code": currency_code,
+                    "currency_code": currency_code or values.get("currency_code", ""),
                     "spend": spend,
+                    "impressions": parse_int(values.get("impr", "")),
+                    "clicks": parse_int(values.get("clicks", "")),
+                    "conversions": parse_int(values.get("conversions", "")),
+                    "conversion_value": parse_decimal(values.get("conv_value", "")),
                 }
             )
             log_event(
                 "GOOGLE_ROW_READY",
                 handler=self.__class__.__name__,
                 row_index=index,
-                label=label,
-                date_id=current_date_id,
-                region_id=region_id,
-                dma_id=dma_id,
+                date_id=date_id,
+                region_label=region_label,
+                dma_label=dma_label,
+                country_label=country_label,
                 spend=spend,
             )
 

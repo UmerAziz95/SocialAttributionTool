@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 
@@ -34,14 +35,20 @@ def get_ingestion_logger() -> logging.Logger:
 
     logger = logging.getLogger(_LOG_NAME)
     if not logger.handlers:
-        logger.setLevel(logging.INFO)
+        configured_level = os.getenv("INGESTION_LOG_LEVEL", "DEBUG").upper()
+        log_level = getattr(logging, configured_level, logging.DEBUG)
+
+        logger.setLevel(log_level)
         handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+        handler.setLevel(log_level)
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(message)s"
         )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.propagate = False
+
+        logger.debug("Initialized ingestion logger", extra={"level": log_level})
     return logger
 
 
