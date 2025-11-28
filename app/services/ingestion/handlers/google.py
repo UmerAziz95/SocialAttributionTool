@@ -10,10 +10,12 @@ from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import (
     DimensionResolver,
+    ensure_account_id,
     ensure_ad_id,
     ensure_adset_id,
     ensure_campaign_id,
     ensure_date_id,
+    ensure_platform_id,
 )
 from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal, parse_int
@@ -52,6 +54,48 @@ class GoogleSpendHandler(IngestionHandler):
 
         platform_id = resolver.require("platform_id")
         account_id = resolver.require("account_id")
+        platform_name = resolver.optional("platform_name") or resolver.optional(
+            "platform_label"
+        )
+        ensured_platform_id = await ensure_platform_id(
+            session,
+            platform_id,
+            name=platform_name,
+        )
+
+        log_event(
+            "PLATFORM_DIMENSION_ENSURED",
+            handler=self.__class__.__name__,
+            supplied_platform_id=platform_id,
+            ensured_platform_id=ensured_platform_id,
+            platform_name=platform_name,
+        )
+
+        platform_id = ensured_platform_id
+
+        account_external_id = resolver.optional("account_external_id")
+        account_name = resolver.optional("account_name") or resolver.optional(
+            "account_label"
+        )
+        ensured_account_id = await ensure_account_id(
+            session,
+            account_id,
+            platform_id,
+            external_id=account_external_id,
+            name=account_name,
+        )
+
+        log_event(
+            "ACCOUNT_DIMENSION_ENSURED",
+            handler=self.__class__.__name__,
+            supplied_account_id=account_id,
+            ensured_account_id=ensured_account_id,
+            platform_id=platform_id,
+            account_external_id=account_external_id,
+            account_name=account_name,
+        )
+
+        account_id = ensured_account_id
         default_campaign_name = "Google Campaign"
         default_adset_name = "Google Ad Set"
         default_ad_name = "Google Ad"
