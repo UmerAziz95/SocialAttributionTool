@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import FactMarketingDaily
 from app.services.ingestion.base import IngestionHandler
-from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
+from app.services.ingestion.dimensions import (
+    DimensionResolver,
+    ensure_ad_id,
+    ensure_adset_id,
+    ensure_campaign_id,
+    ensure_date_id,
+)
 from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal, parse_int
 from app.services.ingestion.types import IngestionContext, IngestionResult
@@ -31,7 +37,7 @@ class GoogleSpendHandler(IngestionHandler):
         self, normalized: NormalizationResult, context: IngestionContext
     ) -> None:  # type: ignore[override]
         self._ensure_required_columns(normalized, self.required_columns)
-        for key in ("platform_id", "account_id", "campaign_id", "adset_id", "ad_id"):
+        for key in ("platform_id", "account_id"):
             if key not in context.column_map:
                 raise ValueError(f"column_map must include '{key}' for Google ingestions")
 
@@ -46,9 +52,9 @@ class GoogleSpendHandler(IngestionHandler):
 
         platform_id = resolver.require("platform_id")
         account_id = resolver.require("account_id")
-        campaign_id = resolver.require("campaign_id")
-        adset_id = resolver.require("adset_id")
-        ad_id = resolver.require("ad_id")
+        default_campaign_name = "Google Campaign"
+        default_adset_name = "Google Ad Set"
+        default_ad_name = "Google Ad"
         attribution_id = await self._resolve_attribution_id(session, context)
         if not attribution_id:
             attribution_id = resolver.optional("attribution_id")
@@ -60,14 +66,15 @@ class GoogleSpendHandler(IngestionHandler):
             handler=self.__class__.__name__,
             platform_id=platform_id,
             account_id=account_id,
-            campaign_id=campaign_id,
-            adset_id=adset_id,
-            ad_id=ad_id,
+            campaign_id=resolver.optional("campaign_id"),
+            adset_id=resolver.optional("adset_id"),
+            ad_id=resolver.optional("ad_id"),
             attribution_id=attribution_id,
             currency_code=currency_code,
         )
 
         payload: list[dict] = []
+        delete_scopes: set[tuple[int, int, int, int]] = set()
 
         for index, row in enumerate(normalized.rows, start=1):
             values = row.values
@@ -103,6 +110,34 @@ class GoogleSpendHandler(IngestionHandler):
             region_label = values.get("region_matched", "")
             dma_label = values.get("dma_region_matched", "")
             country_label = values.get("countryterritory_matched", "")
+            adset_name = values.get("ad_group") or values.get("adset")
+            ad_name = values.get("ad")
+
+            campaign_id = resolver.optional("campaign_id")
+            if campaign_id is None:
+                campaign_name = values.get("campaign") or default_campaign_name
+                campaign_id = await ensure_campaign_id(
+                    session, account_id, name=campaign_name
+                )
+
+            adset_id = resolver.optional("adset_id")
+            if adset_id is None:
+                adset_id = await ensure_adset_id(
+                    session,
+                    campaign_id,
+                    name=adset_name or values.get("campaign") or default_adset_name,
+                )
+
+            ad_id = resolver.optional("ad_id")
+            if ad_id is None:
+                ad_id = await ensure_ad_id(
+                    session,
+                    adset_id,
+                    name=ad_name
+                    or adset_name
+                    or values.get("campaign")
+                    or default_ad_name,
+                )
 
             payload.append(
                 {
@@ -124,6 +159,7 @@ class GoogleSpendHandler(IngestionHandler):
                     "conversion_value": parse_decimal(values.get("conv_value", "")),
                 }
             )
+            delete_scopes.add((campaign_id, adset_id, ad_id, date_id))
             log_event(
                 "GOOGLE_ROW_READY",
                 handler=self.__class__.__name__,
@@ -175,17 +211,28 @@ class GoogleSpendHandler(IngestionHandler):
         log_event(
             "DATABASE_DELETE_SCOPE",
             handler=self.__class__.__name__,
-            date_ids=sorted(date_ids),
+            scopes=[
+                {
+                    "campaign_id": c,
+                    "adset_id": a,
+                    "ad_id": ad,
+                    "date_id": d,
+                }
+                for c, a, ad, d in sorted(delete_scopes)
+            ],
         )
-        delete_stmt = delete(FactMarketingDaily).where(
-            FactMarketingDaily.platform_id == platform_id,
-            FactMarketingDaily.account_id == account_id,
-            FactMarketingDaily.campaign_id == campaign_id,
-            FactMarketingDaily.adset_id == adset_id,
-            FactMarketingDaily.ad_id == ad_id,
-            FactMarketingDaily.date_id.in_(date_ids),
-        )
-        await session.execute(delete_stmt)
+        for scope_campaign_id, scope_adset_id, scope_ad_id, scope_date_id in sorted(
+            delete_scopes
+        ):
+            delete_stmt = delete(FactMarketingDaily).where(
+                FactMarketingDaily.platform_id == platform_id,
+                FactMarketingDaily.account_id == account_id,
+                FactMarketingDaily.campaign_id == scope_campaign_id,
+                FactMarketingDaily.adset_id == scope_adset_id,
+                FactMarketingDaily.ad_id == scope_ad_id,
+                FactMarketingDaily.date_id == scope_date_id,
+            )
+            await session.execute(delete_stmt)
         await session.execute(insert(FactMarketingDaily), payload)
         await session.commit()
 
