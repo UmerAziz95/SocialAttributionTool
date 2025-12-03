@@ -95,16 +95,34 @@ def normalize_file(path: Path) -> NormalizationResult:
     headers: list[str] | None = None
     data_rows: list[list[str]] = []
     raw_headers: list[str] | None = None
+    skipped_title_rows = 0
+    
     for row in reader:
         if not any((cell or "").strip() for cell in row):
             continue
+        
+        # Detect Google CSV format: skip title rows (single column or date range rows)
+        # Google CSVs often have: "Spend by country (ROW only)" then date range, then actual headers
         if headers is None:
+            row_text = " ".join(cell.strip() for cell in row if cell.strip())
+            # Skip if it's a single column row (title) or looks like a date range
+            if len([c for c in row if c.strip()]) <= 1 or (" - " in row_text and any(char.isdigit() for char in row_text)):
+                skipped_title_rows += 1
+                log_event(
+                    "SKIPPED_TITLE_ROW",
+                    row_content=row_text[:100],
+                    row_index=skipped_title_rows,
+                )
+                continue
+            
+            # This should be the actual header row (has multiple columns)
             raw_headers = [cell for cell in row]
             headers = [_normalize_header(cell) for cell in row]
             log_event(
                 "HEADER_NORMALIZED",
                 raw_headers=raw_headers,
                 normalized_headers=headers,
+                skipped_title_rows=skipped_title_rows,
             )
             continue
         data_rows.append(row)

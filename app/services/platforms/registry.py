@@ -47,6 +47,9 @@ def _normalize_key(filename: str) -> str:
         cleaned = cleaned[: -len("__normalized.csv")] + ".csv"
     if cleaned.endswith(".csv"):
         cleaned = cleaned[: -len(".csv")]
+    # For Google files, match any filename containing "google"
+    if "google" in cleaned:
+        return "google"
     return cleaned
 
 
