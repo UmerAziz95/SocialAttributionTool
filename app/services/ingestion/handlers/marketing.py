@@ -1243,32 +1243,68 @@ class MetaRegionHandler(MarketingHandler):
 
 class PinterestDMAHandler(MarketingHandler):
     file_patterns = ("metro+ads_performance_pinterest",)
-    required_columns = ("targeting_value", "date", "paid_impressions")
+    required_columns = ("targeting_value", "date_range_start", "paid_impressions", "spend_in_account_currency")
+    date_column = "date_range_start"
     dma_column = "targeting_value"
+    require_adset_inputs = False
+    require_ad_inputs = False
+    adset_name_fields = ("campaign_name", "targeting_value")
+    ad_name_fields = ("campaign_name", "targeting_value")
     metric_specs = {
         "spend": MetricSpec("spend_in_account_currency", parse_decimal),
         "impressions": MetricSpec("paid_impressions", parse_int),
         "clicks": MetricSpec("paid_pin_clicks", parse_int),
-        "conversions": MetricSpec("total_conversions_checkout", parse_int),
-        "conversion_value": MetricSpec("total_order_value_checkout", parse_decimal),
-        "add_to_cart": MetricSpec("web_conversions_add_to_cart", parse_int),
-        "video_view_time": MetricSpec("paid_average_video_play_time", parse_decimal),
     }
+
+    def _metro_surrogate(self, values: dict[str, str], row_index: int) -> str:
+        for field in ("targeting_value", "campaign_name"):
+            candidate = (values.get(field, "") or "").strip()
+            if candidate:
+                return candidate
+        return f"metro_row_{row_index}"
+
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        return self._metro_surrogate(values, row_index)
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        return adset_name or self._metro_surrogate(values, row_index)
 
 
 class PinterestRegionHandler(MarketingHandler):
     file_patterns = ("region+ads_performance_pinterest",)
-    required_columns = ("targeting_value", "date", "paid_impressions")
+    required_columns = ("targeting_value", "date_range_start", "paid_impressions", "spend_in_account_currency")
+    date_column = "date_range_start"
     region_column = "targeting_value"
+    require_adset_inputs = False
+    require_ad_inputs = False
+    adset_name_fields = ("campaign_name", "targeting_value")
+    ad_name_fields = ("campaign_name", "targeting_value")
     metric_specs = {
         "spend": MetricSpec("spend_in_account_currency", parse_decimal),
         "impressions": MetricSpec("paid_impressions", parse_int),
         "clicks": MetricSpec("paid_pin_clicks", parse_int),
-        "conversions": MetricSpec("total_conversions_checkout", parse_int),
-        "conversion_value": MetricSpec("total_order_value_checkout", parse_decimal),
-        "add_to_cart": MetricSpec("web_conversions_add_to_cart", parse_int),
-        "video_view_time": MetricSpec("paid_average_video_play_time", parse_decimal),
     }
+
+    def _region_surrogate(self, values: dict[str, str], row_index: int) -> str:
+        for field in ("targeting_value", "campaign_name"):
+            candidate = (values.get(field, "") or "").strip()
+            if candidate:
+                return candidate
+        return f"region_row_{row_index}"
+
+    def _fallback_adset_name(
+        self, values: dict[str, str], row_index: int
+    ) -> str | None:
+        return self._region_surrogate(values, row_index)
+
+    def _fallback_ad_name(
+        self, values: dict[str, str], row_index: int, adset_name: str | None
+    ) -> str | None:
+        return adset_name or self._region_surrogate(values, row_index)
 
 
 class TikTokDMAHandler(MarketingHandler):
