@@ -206,7 +206,8 @@ class FileIngestionService:
                 status=status,
                 summary=result.summary,
             )
-            raise
+            # Surface the handler error in the API response to avoid opaque 500s.
+            raise HTTPException(status_code=500, detail=error_message)
         else:
             result.finished_at = datetime.utcnow()
             if context.dry_run:
