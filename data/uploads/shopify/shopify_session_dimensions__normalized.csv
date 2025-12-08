@@ -1,0 +1,176 @@
+day,session_city,session_country,session_region,sessions,sessions_that_completed_checkout,online_store_visitors,day_previous_month,sessions_previous_month,sessions_that_completed_checkout_previous_month,online_store_visitors_previous_month
+2025-09-01,Enniskillen,United Kingdom,Northern Ireland,14,0,12,2025-08-01,5,0,5
+2025-09-01,Navojoa,Mexico,Sonora,1,0,1,2025-08-01,0,0,0
+2025-09-01,Traverse City,United States,Michigan,11,0,10,2025-08-01,17,0,13
+2025-09-01,Nettetal,Germany,North Rhine-Westphalia,0,0,0,2025-08-01,1,0,1
+2025-09-01,Giza,Egypt,Giza,14,0,14,2025-08-01,9,0,9
+2025-09-02,Procida,Italy,Campania,1,0,1,2025-08-02,0,0,0
+2025-09-02,Agde,France,Occitanie,0,0,0,2025-08-02,2,0,1
+2025-09-02,Rickenbach,Germany,Baden-Wurttemberg,0,0,0,2025-08-02,1,0,1
+2025-09-02,Annemasse,France,Auvergne-Rhône-Alpes,12,0,8,2025-08-02,5,0,5
+2025-09-02,Blue Earth,United States,Minnesota,0,0,0,2025-08-02,1,0,1
+2025-09-03,Krasne,Poland,Subcarpathia,0,0,0,2025-08-03,1,0,1
+2025-09-03,Herzberg am Harz,Germany,Lower Saxony,0,0,0,2025-08-03,1,0,1
+2025-09-03,Krakow,Poland,Lesser Poland,283,0,243,2025-08-03,168,0,144
+2025-09-03,Corydon,United States,Indiana,0,0,0,2025-08-03,1,0,1
+2025-09-03,Montfoort,The Netherlands,Utrecht,0,0,0,2025-08-03,2,0,1
+2025-09-04,Redwood Valley,United States,California,1,0,1,2025-08-04,0,0,0
+2025-09-04,Cybinka,Poland,Lubusz,0,0,0,2025-08-04,1,0,1
+2025-09-04,Pérols,France,Occitanie,1,0,1,2025-08-04,0,0,0
+2025-09-04,Llansantffraid-ym-Mechain,United Kingdom,Wales,1,0,1,2025-08-04,0,0,0
+2025-09-04,Västra Tunhem,Sweden,Västra Götaland County,0,0,0,2025-08-04,2,0,1
+2025-09-05,Siegen,Germany,North Rhine-Westphalia,8,0,6,2025-08-05,7,0,6
+2025-09-05,Ennis,Ireland,Munster,1,0,1,2025-08-05,3,0,2
+2025-09-05,Lampeter,United Kingdom,Wales,0,0,0,2025-08-05,1,0,1
+2025-09-05,Elk River,United States,Minnesota,6,0,6,2025-08-05,4,0,4
+2025-09-05,Mequon,United States,Wisconsin,6,0,5,2025-08-05,4,0,4
+2025-09-05,Ennis,United States,Texas,3,0,2,2025-08-05,0,0,0
+2025-09-05,Ennis,United States,Montana,0,0,0,2025-08-05,2,0,1
+2025-09-06,Oak Lawn,United States,Illinois,0,0,0,2025-08-06,17,0,16
+2025-09-06,Low,Canada,Quebec,1,0,1,2025-08-06,0,0,0
+2025-09-06,Envigado,Colombia,Antioquia,0,0,0,2025-08-06,6,1,6
+2025-09-06,Chiang Mai,Thailand,Chiang Mai,1,0,1,2025-08-06,2,0,1
+2025-09-06,Langenlonsheim,Germany,Rheinland-Pfalz,0,0,0,2025-08-06,1,0,1
+2025-09-07,Delft,The Netherlands,South Holland,8,0,6,2025-08-07,6,0,4
+2025-09-07,Gladstone,Australia,Queensland,1,0,1,2025-08-07,9,0,7
+2025-09-07,Drahovce,Slovakia,Trnava Region,0,0,0,2025-08-07,1,0,1
+2025-09-07,Lake Country,Canada,British Columbia,1,0,1,2025-08-07,3,0,3
+2025-09-07,Altlußheim,Germany,Baden-Wurttemberg,1,0,1,2025-08-07,0,0,0
+2025-09-07,Gladstone,United States,New Jersey,0,0,0,2025-08-07,1,0,1
+2025-09-08,Point Lookout,United States,Missouri,0,0,0,2025-08-08,1,0,1
+2025-09-08,St-Hippolyte,Canada,Quebec,0,0,0,2025-08-08,4,0,3
+2025-09-08,Heppner,United States,Oregon,3,0,3,2025-08-08,2,0,2
+2025-09-08,Rosemount,United States,Minnesota,6,0,6,2025-08-08,6,0,6
+2025-09-08,Bethesda,United States,Maryland,33,0,27,2025-08-08,16,0,14
+2025-09-09,Sprockhövel,Germany,North Rhine-Westphalia,0,0,0,2025-08-09,1,0,1
+2025-09-09,The Bronx,United States,New York,602,6,538,2025-08-09,472,5,400
+2025-09-09,Ulsteinvik,Norway,Møre og Romsdal,1,0,1,2025-08-09,1,0,1
+2025-09-09,Essen,Germany,Lower Saxony,1,0,1,2025-08-09,0,0,0
+2025-09-09,Essen,Germany,North Rhine-Westphalia,147,0,139,2025-08-09,58,1,54
+2025-09-09,Bleskensgraaf,The Netherlands,South Holland,6,0,5,2025-08-09,0,0,0
+2025-09-10,Głogówek,Poland,Opole Voivodeship,1,0,1,2025-08-10,0,0,0
+2025-09-10,Koźmin Wielkopolski,Poland,Greater Poland,1,0,1,2025-08-10,0,0,0
+2025-09-10,Portales,United States,New Mexico,0,0,0,2025-08-10,1,0,1
+2025-09-10,Dottikon,Switzerland,Aargau,2,0,2,2025-08-10,0,0,0
+2025-09-10,Piotrkow Trybunalski,Poland,Łódź Voivodeship,1,0,1,2025-08-10,0,0,0
+2025-09-11,Tonalá,Mexico,Jalisco,1,0,1,2025-08-11,0,0,0
+2025-09-11,Montevideo,United States,Minnesota,0,0,0,2025-08-11,1,0,1
+2025-09-11,Courchelettes,France,Hauts-de-France,0,0,0,2025-08-11,2,0,1
+2025-09-11,Montevideo,Uruguay,Montevideo Department,21,0,20,2025-08-11,16,0,15
+2025-09-11,Surrey,Canada,British Columbia,233,5,208,2025-08-11,251,3,233
+2025-09-11,Tring,United Kingdom,England,5,0,4,2025-08-11,4,0,2
+2025-09-12,Bethlehem,United States,Georgia,1,0,1,2025-08-12,0,0,0
+2025-09-12,Bethlehem,United States,Pennsylvania,28,1,24,2025-08-12,19,0,19
+2025-09-12,New Plymouth,New Zealand,Taranaki Region,22,0,19,2025-08-12,20,1,20
+2025-09-12,Ebern,Germany,Bavaria,1,0,1,2025-08-12,0,0,0
+2025-09-12,Ribnitz-Damgarten,Germany,Mecklenburg-Vorpommern,0,0,0,2025-08-12,2,0,1
+2025-09-12,Ettringen,Germany,Bavaria,1,0,1,2025-08-12,0,0,0
+2025-09-13,Colmar,France,Grand Est,2,0,2,2025-08-13,5,0,3
+2025-09-13,Mohnton,United States,Pennsylvania,0,0,0,2025-08-13,1,0,1
+2025-09-13,Jersey Shore,United States,Pennsylvania,2,0,2,2025-08-13,1,0,1
+2025-09-13,Long Beach,United States,New York,11,0,11,2025-08-13,20,0,15
+2025-09-13,Long Beach,United States,Mississippi,3,1,3,2025-08-13,1,0,1
+2025-09-13,Long Beach,United States,California,151,1,129,2025-08-13,125,2,117
+2025-09-13,Long Beach,United States,Washington,0,0,0,2025-08-13,1,0,1
+2025-09-13,Spikkestad,Norway,Akershus,0,0,0,2025-08-13,1,0,1
+2025-09-14,Bjärred,Sweden,Skåne County,0,0,0,2025-08-14,1,0,1
+2025-09-14,Wagoner,United States,Oklahoma,1,0,1,2025-08-14,2,0,2
+2025-09-14,Rowland Heights,United States,California,5,0,5,2025-08-14,8,0,8
+2025-09-14,Guesnain,France,Hauts-de-France,0,0,0,2025-08-14,1,0,1
+2025-09-14,Egan,United States,Louisiana,1,0,1,2025-08-14,0,0,0
+2025-09-15,San Vicente,Mexico,Nayarit,1,0,1,2025-08-15,0,0,0
+2025-09-15,Oak Forest,United States,Illinois,5,0,5,2025-08-15,7,0,6
+2025-09-15,Sins,Switzerland,Aargau,0,0,0,2025-08-15,2,0,1
+2025-09-15,Bayreuth,Germany,Bavaria,5,0,3,2025-08-15,2,0,2
+2025-09-15,Lubliniec,Poland,Silesia,0,0,0,2025-08-15,2,0,2
+2025-09-16,Page,United States,Arizona,1,0,1,2025-08-16,0,0,0
+2025-09-16,Edgewater,United States,Florida,5,0,4,2025-08-16,2,0,2
+2025-09-16,Edgewater,United States,Maryland,4,0,4,2025-08-16,4,0,4
+2025-09-16,Edgewater,United States,New Jersey,1,0,1,2025-08-16,0,0,0
+2025-09-16,Örnsköldsvik,Sweden,Västernorrland County,1,0,1,2025-08-16,0,0,0
+2025-09-16,Étival-Clairefontaine,France,Grand Est,0,0,0,2025-08-16,1,0,1
+2025-09-16,Thomaston,United States,Georgia,3,0,3,2025-08-16,8,0,5
+2025-09-17,Gurupi,Brazil,Tocantins,0,0,0,2025-08-17,1,0,1
+2025-09-17,Schöneck,Germany,Hesse,1,0,1,2025-08-17,0,0,0
+2025-09-17,Greifensee,Switzerland,Zurich,0,0,0,2025-08-17,1,0,1
+2025-09-17,Glendale Heights,United States,Illinois,1,0,1,2025-08-17,8,0,6
+2025-09-17,Toulouse,France,Occitanie,147,0,144,2025-08-17,32,0,28
+2025-09-18,Esher,United Kingdom,England,5,1,5,2025-08-18,0,0,0
+2025-09-18,Wiesbaden,Germany,Hesse,16,1,14,2025-08-18,32,0,28
+2025-09-18,Setúbal,Portugal,Setúbal,4,0,4,2025-08-18,5,0,4
+2025-09-18,Sacavém,Portugal,Lisbon,0,0,0,2025-08-18,1,0,1
+2025-09-18,Baia Mare,Romania,Maramureş,13,0,10,2025-08-18,10,0,9
+2025-09-19,Beirut,Lebanon,Beyrouth,19,0,18,2025-08-19,15,0,15
+2025-09-19,Iguatu,Brazil,Ceará,0,0,0,2025-08-19,2,0,1
+2025-09-19,Acre,Israel,Northern District,0,0,0,2025-08-19,1,0,1
+2025-09-19,Mmabatho,South Africa,North West,1,0,1,2025-08-19,0,0,0
+2025-09-19,Sax,Spain,Valencia,0,0,0,2025-08-19,1,0,1
+2025-09-20,Göttingen,Germany,Lower Saxony,1,0,1,2025-08-20,2,0,2
+2025-09-20,Quitman,United States,Georgia,1,0,1,2025-08-20,0,0,0
+2025-09-20,Sant Celoni,Spain,Catalonia,1,0,1,2025-08-20,0,0,0
+2025-09-20,North Palm Beach,United States,Florida,0,0,0,2025-08-20,1,1,1
+2025-09-20,Hinojedo,Spain,Cantabria,1,0,1,2025-08-20,0,0,0
+2025-09-21,Samson,United States,Alabama,0,0,0,2025-08-21,1,0,1
+2025-09-21,Santa Barbara,United States,California,32,0,27,2025-08-21,35,1,30
+2025-09-21,Gentry,United States,Arkansas,1,0,1,2025-08-21,0,0,0
+2025-09-21,Boyne City,United States,Michigan,1,0,1,2025-08-21,0,0,0
+2025-09-21,Šaľa,Slovakia,Nitra Region,3,0,3,2025-08-21,3,0,3
+2025-09-22,Leiria,Portugal,Leiria,6,0,5,2025-08-22,12,0,12
+2025-09-22,Cantley,Canada,Quebec,0,0,0,2025-08-22,1,0,1
+2025-09-22,Mollerussa,Spain,Catalonia,0,0,0,2025-08-22,1,0,1
+2025-09-22,Redford,United States,Michigan,29,1,25,2025-08-22,21,0,19
+2025-09-22,North Park,Canada,Ontario,10,0,9,2025-08-22,9,0,7
+2025-09-23,Pinhal Novo,Portugal,Setúbal,0,0,0,2025-08-23,1,0,1
+2025-09-23,Gainsborough,United Kingdom,England,2,0,1,2025-08-23,1,0,1
+2025-09-23,'s-Gravenzande,The Netherlands,South Holland,0,0,0,2025-08-23,1,0,1
+2025-09-23,Delton,United States,Michigan,2,0,2,2025-08-23,0,0,0
+2025-09-23,Kerman,United States,California,2,0,2,2025-08-23,1,0,1
+2025-09-24,Brewood,United Kingdom,England,1,0,1,2025-08-24,0,0,0
+2025-09-24,Aubenas,France,Auvergne-Rhône-Alpes,0,0,0,2025-08-24,2,0,1
+2025-09-24,Larose,United States,Louisiana,0,0,0,2025-08-24,3,0,2
+2025-09-24,Breaux Bridge,United States,Louisiana,8,0,6,2025-08-24,2,0,2
+2025-09-24,Osseo,United States,Minnesota,4,0,3,2025-08-24,0,0,0
+2025-09-25,Succasunna,United States,New Jersey,0,0,0,2025-08-25,5,0,4
+2025-09-25,Pleasant Prairie,United States,Wisconsin,5,0,3,2025-08-25,0,0,0
+2025-09-25,Celle,Germany,Lower Saxony,4,0,4,2025-08-25,4,0,3
+2025-09-25,Königswartha,Germany,Saxony,3,0,1,2025-08-25,0,0,0
+2025-09-25,Lohmar,Germany,North Rhine-Westphalia,0,0,0,2025-08-25,1,0,1
+2025-09-26,Popovo,Bulgaria,Targovishte,0,0,0,2025-08-26,2,0,2
+2025-09-26,Plymouth,United States,Minnesota,4,0,4,2025-08-26,1,0,1
+2025-09-26,Plymouth,United States,Massachusetts,21,0,18,2025-08-26,8,0,8
+2025-09-26,Plymouth,United States,North Carolina,0,0,0,2025-08-26,3,0,2
+2025-09-26,Plymouth,United States,New Hampshire,2,1,2,2025-08-26,5,0,3
+2025-09-26,Plymouth,United States,California,1,0,1,2025-08-26,0,0,0
+2025-09-26,Los Alamitos,United States,California,5,0,4,2025-08-26,9,0,8
+2025-09-26,Castle Hayne,United States,North Carolina,1,0,1,2025-08-26,0,0,0
+2025-09-26,Plymouth,United Kingdom,England,41,1,33,2025-08-26,27,1,21
+2025-09-26,Câmpina,Romania,Prahova,2,0,2,2025-08-26,0,0,0
+2025-09-27,Deming,United States,Washington,0,0,0,2025-08-27,1,0,1
+2025-09-27,Deming,United States,New Mexico,0,0,0,2025-08-27,1,0,1
+2025-09-27,Carpinteria,United States,California,1,0,1,2025-08-27,0,0,0
+2025-09-27,Bethune,United States,South Carolina,0,0,0,2025-08-27,2,0,2
+2025-09-27,Daphne,United States,Alabama,4,0,4,2025-08-27,11,0,10
+2025-09-27,Justin,United States,Texas,5,0,4,2025-08-27,7,0,5
+2025-09-28,Camarillo,United States,California,11,0,11,2025-08-28,24,1,19
+2025-09-28,Wöbbelin,Germany,Mecklenburg-Vorpommern,1,0,1,2025-08-28,0,0,0
+2025-09-28,Fountain Valley,United States,California,22,0,18,2025-08-28,15,0,14
+2025-09-28,Rumbek,South Sudan,Lakes,0,0,0,2025-08-28,1,0,1
+2025-09-28,Shawnigan Lake,Canada,British Columbia,1,0,1,2025-08-28,2,0,2
+2025-09-29,Houilles,France,Île-de-France,3,0,3,2025-08-29,3,0,2
+2025-09-29,Coacalco,Mexico,México,3,0,3,2025-08-29,0,0,0
+2025-09-29,Encarnación,Paraguay,Itapúa,0,0,0,2025-08-29,1,0,1
+2025-09-29,Lørenskog,Norway,Akershus,5,1,5,2025-08-29,5,0,3
+2025-09-29,Tønder,Denmark,South Denmark,1,0,1,2025-08-29,0,0,0
+2025-09-30,Dorchester,United States,Massachusetts,9,0,6,2025-08-30,9,1,7
+2025-09-30,Temse,Belgium,Flanders,0,0,0,2025-08-30,1,0,1
+2025-09-30,Marino,Italy,Lazio,3,0,3,2025-08-30,0,0,0
+2025-09-30,Pahurehure,New Zealand,Auckland,8,0,7,2025-08-30,0,0,0
+2025-09-30,Cohoes,United States,New York,1,0,1,2025-08-30,3,0,3
+,Schüpfheim,Switzerland,Lucerne,0,0,0,2025-08-31,1,0,1
+,Dayton,United States,Ohio,0,0,0,2025-08-31,83,1,72
+,Dayton,United States,Texas,0,0,0,2025-08-31,6,0,5
+,Dayton,United States,Washington,0,0,0,2025-08-31,1,0,1
+,Dayton,United States,Nevada,0,0,0,2025-08-31,3,0,3
+,Hyvinkää,Finland,Uusimaa,0,0,0,2025-08-31,2,0,2
+,Augsburg,Germany,Bavaria,0,0,0,2025-08-31,36,0,28
+,Sint-Niklaas,Belgium,Flanders,0,0,0,2025-08-31,3,0,2
