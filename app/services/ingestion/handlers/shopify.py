@@ -94,6 +94,7 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                     raw=values,
                 )
                 continue
+            # Populate the date dimension but store the raw date value in staging
             date_id = await ensure_date_id(session, parsed_date)
             log_event(
                 "ROW_DATE_RESOLVED",
@@ -103,13 +104,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 date_id=date_id,
             )
 
-            country_iso = resolver.resolve_mapping("country_iso_map", values.get(self.country_column, ""))
-            region_code = resolver.resolve_mapping("region_code_map", values.get(self.region_column, ""))
+            country_raw = (values.get(self.country_column, "") or "").strip()
+            region_raw = (values.get(self.region_column, "") or "").strip()
             city_name = (values.get(self.city_column, "") or "").strip()
+            country_iso = resolver.resolve_mapping("country_iso_map", country_raw) or country_raw
+            region_code = resolver.resolve_mapping("region_code_map", region_raw) or region_raw
             if not country_iso or not region_code or not city_name:
                 result.skipped += 1
                 result.warnings.append(
-                    f"Row {index}: missing location mapping — ensure country/region/city are present in column_map"
+                    f"Row {index}: missing location data — provide country/region/city values"
                 )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_LOCATION",
@@ -120,15 +123,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 continue
 
             record = {
-                "date_id": date_id,
+                "date_id": parsed_date,
                 "platform_id": platform_id,
                 "account_id": account_id,
                 "country_iso2": country_iso,
                 "region_code": region_code,
                 "city_name_norm": city_name.lower(),
-                "country_id": resolver.resolve_mapping("country_map", values.get(self.country_column, "")),
-                "region_id": resolver.resolve_mapping("region_map", values.get(self.region_column, "")),
-                "city_id": resolver.resolve_mapping("city_map", values.get(self.city_column, "")),
+                "country_id": resolver.resolve_mapping("country_map", country_raw),
+                "region_id": resolver.resolve_mapping("region_map", region_raw),
+                "city_id": resolver.resolve_mapping("city_map", city_name),
                 "attribution_id": attribution_id,
                 "_source_file": context.file_path.name,
             }
@@ -283,13 +286,15 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 date_id=date_id,
             )
 
-            country_iso = resolver.resolve_mapping("country_iso_map", values.get(self.country_column, ""))
-            region_code = resolver.resolve_mapping("region_code_map", values.get(self.region_column, ""))
+            country_raw = (values.get(self.country_column, "") or "").strip()
+            region_raw = (values.get(self.region_column, "") or "").strip()
             city_name = (values.get(self.city_column, "") or "").strip()
+            country_iso = resolver.resolve_mapping("country_iso_map", country_raw) or country_raw
+            region_code = resolver.resolve_mapping("region_code_map", region_raw) or region_raw
             if not country_iso or not region_code or not city_name:
                 result.skipped += 1
                 result.warnings.append(
-                    f"Row {index}: missing location mapping — ensure country/region/city are present in column_map"
+                    f"Row {index}: missing location data — provide country/region/city values"
                 )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_LOCATION",
@@ -300,15 +305,15 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 continue
 
             record = {
-                "date_id": date_id,
+                "date_id": parsed_date,
                 "platform_id": platform_id,
                 "account_id": account_id,
                 "country_iso2": country_iso,
                 "region_code": region_code,
                 "city_name_norm": city_name.lower(),
-                "country_id": resolver.optional("country_map", country_iso),
-                "region_id": resolver.optional("region_map", region_code),
-                "city_id": resolver.optional("city_map", city_name),
+                "country_id": resolver.resolve_mapping("country_map", country_raw),
+                "region_id": resolver.resolve_mapping("region_map", region_raw),
+                "city_id": resolver.resolve_mapping("city_map", city_name),
                 "attribution_id": attribution_id,
                 "_source_file": normalized.path.name,
             }
