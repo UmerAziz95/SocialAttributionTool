@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import StgShopifyDailyCity
 from app.services.ingestion.base import IngestionHandler
-from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
+from app.services.ingestion.dimensions import (
+    DimensionResolver,
+    ensure_account_id,
+    ensure_date_id,
+    ensure_platform_id,
+)
 from app.services.ingestion.logging import log_event
 from app.services.ingestion.parsers import parse_date, parse_decimal
 from app.services.ingestion.types import IngestionContext, IngestionResult
@@ -42,6 +47,38 @@ class ShopifyBaseHandler(IngestionHandler):
             if key not in context.column_map:
                 raise ValueError(f"column_map must include '{key}' for Shopify ingestions")
 
+    async def _ensure_dimensions(
+        self,
+        session: AsyncSession,
+        *,
+        platform_id: int,
+        account_id: int,
+    ) -> tuple[int, int]:
+        """Ensure platform and account dimensions exist before ingestion."""
+
+        ensured_platform_id = await ensure_platform_id(session, platform_id)
+        log_event(
+            "PLATFORM_DIMENSION_ENSURED",
+            handler=self.__class__.__name__,
+            supplied_platform_id=platform_id,
+            ensured_platform_id=ensured_platform_id,
+        )
+
+        ensured_account_id = await ensure_account_id(
+            session,
+            account_id,
+            ensured_platform_id,
+        )
+        log_event(
+            "ACCOUNT_DIMENSION_ENSURED",
+            handler=self.__class__.__name__,
+            supplied_account_id=account_id,
+            ensured_account_id=ensured_account_id,
+            platform_id=ensured_platform_id,
+        )
+
+        return ensured_platform_id, ensured_account_id
+
 
 class ShopifySalesHandler(ShopifyBaseHandler):
     file_patterns = ("shopify_sales_dimensions",)
@@ -67,6 +104,9 @@ class ShopifySalesHandler(ShopifyBaseHandler):
         result = IngestionResult()
         platform_id = resolver.require("platform_id")
         account_id = resolver.require("account_id")
+        platform_id, account_id = await self._ensure_dimensions(
+            session, platform_id=platform_id, account_id=account_id
+        )
         attribution_id = resolver.optional("attribution_id")
 
         log_event(
@@ -250,6 +290,9 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
         result = IngestionResult()
         platform_id = resolver.require("platform_id")
         account_id = resolver.require("account_id")
+        platform_id, account_id = await self._ensure_dimensions(
+            session, platform_id=platform_id, account_id=account_id
+        )
         attribution_id = resolver.optional("attribution_id")
 
         log_event(
