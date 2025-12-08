@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import api_router  # <-- keep on one line
 from app.middlewares.cors import add_cors
+from app.db.init_db import init_db
 
 APP_DESCRIPTION = """Social Attribution Tool APIs for managing marketing ingestion and analytics.\n\n"""
 
@@ -21,6 +22,7 @@ OPENAPI_TAGS_METADATA = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await init_db()
     yield
 
 def create_app() -> FastAPI:

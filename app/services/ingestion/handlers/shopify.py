@@ -7,7 +7,7 @@ from typing import Callable, Iterable
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.marketing import FactShopifyDaily, StgShopifyDailyCity
+from app.models.marketing import StgShopifyDailyCity
 from app.services.ingestion.base import IngestionHandler
 from app.services.ingestion.dimensions import DimensionResolver, ensure_date_id
 from app.services.ingestion.logging import log_event
@@ -49,9 +49,12 @@ class ShopifySalesHandler(ShopifyBaseHandler):
     metric_specs = {
         "orders": ShopifyMetricSpec("orders", parse_decimal),
         "gross_sales": ShopifyMetricSpec("gross_sales", parse_decimal),
-        "shipping": ShopifyMetricSpec("shipping", parse_decimal),
-        "refunds": ShopifyMetricSpec("refunds", parse_decimal),
         "total_sales": ShopifyMetricSpec("total_sales", parse_decimal),
+        "net_sales": ShopifyMetricSpec("net_sales", parse_decimal),
+        "duties": ShopifyMetricSpec("duties", parse_decimal),
+        "taxes": ShopifyMetricSpec("taxes", parse_decimal),
+        "returning_customers": ShopifyMetricSpec("returning_customers", parse_decimal),
+        "new_customers": ShopifyMetricSpec("new_customers", parse_decimal),
     }
 
     async def ingest(
@@ -91,6 +94,7 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                     raw=values,
                 )
                 continue
+            # Populate the date dimension but store the raw date value in staging
             date_id = await ensure_date_id(session, parsed_date)
             log_event(
                 "ROW_DATE_RESOLVED",
@@ -100,13 +104,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 date_id=date_id,
             )
 
-            country_iso = resolver.resolve_mapping("country_iso_map", values.get(self.country_column, ""))
-            region_code = resolver.resolve_mapping("region_code_map", values.get(self.region_column, ""))
+            country_raw = (values.get(self.country_column, "") or "").strip()
+            region_raw = (values.get(self.region_column, "") or "").strip()
             city_name = (values.get(self.city_column, "") or "").strip()
+            country_iso = resolver.resolve_mapping("country_iso_map", country_raw) or country_raw
+            region_code = resolver.resolve_mapping("region_code_map", region_raw) or region_raw
             if not country_iso or not region_code or not city_name:
                 result.skipped += 1
                 result.warnings.append(
-                    f"Row {index}: missing location mapping — ensure country/region/city are present in column_map"
+                    f"Row {index}: missing location data — provide country/region/city values"
                 )
                 log_event(
                     "SHOPIFY_ROW_SKIPPED_LOCATION",
@@ -117,15 +123,15 @@ class ShopifySalesHandler(ShopifyBaseHandler):
                 continue
 
             record = {
-                "date_id": date_id,
+                "date_id": parsed_date,
                 "platform_id": platform_id,
                 "account_id": account_id,
                 "country_iso2": country_iso,
                 "region_code": region_code,
                 "city_name_norm": city_name.lower(),
-                "country_id": resolver.resolve_mapping("country_map", values.get(self.country_column, "")),
-                "region_id": resolver.resolve_mapping("region_map", values.get(self.region_column, "")),
-                "city_id": resolver.resolve_mapping("city_map", values.get(self.city_column, "")),
+                "country_id": resolver.resolve_mapping("country_map", country_raw),
+                "region_id": resolver.resolve_mapping("region_map", region_raw),
+                "city_id": resolver.resolve_mapping("city_map", city_name),
                 "attribution_id": attribution_id,
                 "_source_file": context.file_path.name,
             }
@@ -230,8 +236,8 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
     city_column = "session_city"
     metric_specs = {
         "sessions": ShopifyMetricSpec("sessions", parse_decimal),
-        "orders": ShopifyMetricSpec("sessions_that_completed_checkout", parse_decimal),
-        "revenue": ShopifyMetricSpec("online_store_visitors", parse_decimal),
+        "checkout_sessions": ShopifyMetricSpec("sessions_that_completed_checkout", parse_decimal),
+        "online_store_visitors": ShopifyMetricSpec("online_store_visitors", parse_decimal),
     }
 
     async def ingest(
@@ -242,6 +248,17 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
     ) -> IngestionResult:  # type: ignore[override]
         resolver = DimensionResolver(context.column_map)
         result = IngestionResult()
+        platform_id = resolver.require("platform_id")
+        account_id = resolver.require("account_id")
+        attribution_id = resolver.optional("attribution_id")
+
+        log_event(
+            "HANDLER_CONTEXT_RESOLVED",
+            handler=self.__class__.__name__,
+            platform_id=platform_id,
+            account_id=account_id,
+            attribution_id=attribution_id,
+        )
 
         payload: list[dict] = []
         for index, row in enumerate(normalized.rows, start=1):
@@ -269,35 +286,36 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 date_id=date_id,
             )
 
-            country_id = resolver.resolve_mapping("country_map", values.get(self.country_column, ""))
-            region_id = resolver.resolve_mapping("region_map", values.get(self.region_column, ""))
-            city_id = resolver.resolve_mapping("city_map", values.get(self.city_column, ""))
-            postal_id = resolver.resolve_mapping("postal_map", values.get("session_postal_code", ""))
-
-            if None in (country_id, region_id, city_id, postal_id):
+            country_raw = (values.get(self.country_column, "") or "").strip()
+            region_raw = (values.get(self.region_column, "") or "").strip()
+            city_name = (values.get(self.city_column, "") or "").strip()
+            country_iso = resolver.resolve_mapping("country_iso_map", country_raw) or country_raw
+            region_code = resolver.resolve_mapping("region_code_map", region_raw) or region_raw
+            if not country_iso or not region_code or not city_name:
                 result.skipped += 1
                 result.warnings.append(
-                    f"Row {index}: missing dimension mapping — provide country/region/city/postal map entries"
+                    f"Row {index}: missing location data — provide country/region/city values"
                 )
                 log_event(
-                    "SHOPIFY_ROW_SKIPPED_DIMENSION",
+                    "SHOPIFY_ROW_SKIPPED_LOCATION",
                     handler=self.__class__.__name__,
                     row_index=index,
-                    country_id=country_id,
-                    region_id=region_id,
-                    city_id=city_id,
-                    postal_id=postal_id,
+                    raw=values,
                 )
                 continue
 
             record = {
-                "date_id": date_id,
-                "country_id": country_id,
-                "region_id": region_id,
-                "city_id": city_id,
-                "postal_id": postal_id,
-                "currency_code": context.currency_code,
-                "add_to_cart": None,
+                "date_id": parsed_date,
+                "platform_id": platform_id,
+                "account_id": account_id,
+                "country_iso2": country_iso,
+                "region_code": region_code,
+                "city_name_norm": city_name.lower(),
+                "country_id": resolver.resolve_mapping("country_map", country_raw),
+                "region_id": resolver.resolve_mapping("region_map", region_raw),
+                "city_id": resolver.resolve_mapping("city_map", city_name),
+                "attribution_id": attribution_id,
+                "_source_file": normalized.path.name,
             }
             for target_column, spec in self.metric_specs.items():
                 record[target_column] = spec.parser(values.get(spec.column, ""))
@@ -307,10 +325,9 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
                 handler=self.__class__.__name__,
                 row_index=index,
                 date_id=date_id,
-                country_id=country_id,
-                region_id=region_id,
-                city_id=city_id,
-                postal_id=postal_id,
+                country_iso=country_iso,
+                region_code=region_code,
+                city_name=city_name.lower(),
                 metrics={key: record[key] for key in self.metric_specs.keys()},
             )
 
@@ -335,24 +352,25 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             result.inserted = len(payload)
             if context.dry_run:
                 result.summary = (
-                    f"Dry run prepared {len(payload)} Shopify session rows for fact_shopify_daily; "
+                    f"Dry run prepared {len(payload)} Shopify session rows for stg_shopify_daily_city; "
                     f"skipped {result.skipped}."
                 )
             else:
                 result.summary = (
-                    "No Shopify session rows were written; add dimension mappings or fix data and retry."
+                    "No Shopify session rows were written; add location mappings or fix data and retry."
                 )
             return result
 
-        stmt = insert(FactShopifyDaily).values(payload)
+        stmt = insert(StgShopifyDailyCity).values(payload)
         update_columns = {col: stmt.excluded[col] for col in self.metric_specs.keys()}
+        update_columns.update({"_source_file": stmt.excluded._source_file})
         stmt = stmt.on_conflict_do_update(
             index_elements=[
-                FactShopifyDaily.date_id,
-                FactShopifyDaily.country_id,
-                FactShopifyDaily.region_id,
-                FactShopifyDaily.city_id,
-                FactShopifyDaily.postal_id,
+                StgShopifyDailyCity.date_id,
+                StgShopifyDailyCity.account_id,
+                StgShopifyDailyCity.country_iso2,
+                StgShopifyDailyCity.region_code,
+                StgShopifyDailyCity.city_name_norm,
             ],
             set_=update_columns,
         )
@@ -368,10 +386,9 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
             conflict_keys=[
                 "date_id",
                 "account_id",
-                "country_id",
-                "region_id",
-                "city_id",
-                "postal_id",
+                "country_iso2",
+                "region_code",
+                "city_name_norm",
             ],
             updated_columns=list(update_columns.keys()),
         )
@@ -387,6 +404,6 @@ class ShopifySessionsHandler(ShopifyBaseHandler):
 
         result.inserted = len(payload)
         result.summary = (
-            f"Upserted {len(payload)} Shopify session rows into fact_shopify_daily; skipped {result.skipped}."
+            f"Upserted {len(payload)} Shopify session rows into stg_shopify_daily_city; skipped {result.skipped}."
         )
         return result
