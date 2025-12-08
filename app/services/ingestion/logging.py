@@ -5,15 +5,17 @@ import logging
 import os
 from pathlib import Path
 
+from app.core.config import PROJECT_ROOT
+
 
 _LOG_NAME = "app.ingestion"
 # Anchor the log directory to the repository root so the file is always
 # written to a predictable location regardless of the process working
 # directory (for example when running uvicorn from a different folder).
-_BASE_DIR = Path(__file__).resolve().parents[3]
-_LOG_DIR = _BASE_DIR / "data" / "logs"
+_LOG_DIR = (PROJECT_ROOT / "data" / "logs").resolve()
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "ingestion.log"
+_LOG_FILE.touch(exist_ok=True)
 
 _IMPORTANT_EVENTS = {
     "INGEST_START",
@@ -43,13 +45,19 @@ def get_ingestion_logger() -> logging.Logger:
         log_level = getattr(logging, configured_level, logging.DEBUG)
 
         logger.setLevel(log_level)
-        handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
-        handler.setLevel(log_level)
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(message)s"
         )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+
+        file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(log_level)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
         logger.propagate = False
 
         logger.debug("Initialized ingestion logger", extra={"level": log_level})
