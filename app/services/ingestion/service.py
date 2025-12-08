@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.marketing import EventIngestionLog
 from app.services.ingestion.handlers import HANDLERS
+from app.services.ingestion.dimensions import ensure_platform_id
 from app.services.ingestion.logging import get_ingestion_logger, log_event
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import (
@@ -243,6 +244,11 @@ class FileIngestionService:
         error_message: str | None,
     ) -> None:
         platform_id = context.column_map.get("platform_id")
+        platform_name = context.column_map.get("platform_name") or context.column_map.get(
+            "platform_label"
+        )
+        if platform_id is not None:
+            await ensure_platform_id(session, int(platform_id), name=platform_name)
         records_fetched = result.inserted + result.updated
         duration = Decimal(str(result.duration_seconds))
         log_event(

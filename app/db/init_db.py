@@ -18,7 +18,7 @@ def _upgrade_database(database_url: str) -> None:
 
     alembic_cfg = Config(str(ALEMBIC_INI_PATH))
     alembic_cfg.set_main_option("script_location", str(ALEMBIC_SCRIPT_LOCATION))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+    alembic_cfg.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
     command.upgrade(alembic_cfg, "head")
 
