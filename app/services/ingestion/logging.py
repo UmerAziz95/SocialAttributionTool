@@ -7,7 +7,11 @@ from pathlib import Path
 
 
 _LOG_NAME = "app.ingestion"
-_LOG_DIR = Path("data/logs")
+# Anchor the log directory to the repository root so the file is always
+# written to a predictable location regardless of the process working
+# directory (for example when running uvicorn from a different folder).
+_BASE_DIR = Path(__file__).resolve().parents[3]
+_LOG_DIR = _BASE_DIR / "data" / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 _LOG_FILE = _LOG_DIR / "ingestion.log"
 
