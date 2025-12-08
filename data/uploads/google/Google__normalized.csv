@@ -1,0 +1,5 @@
+day,campaign,region_matched,country_territory_matched,dma_region_matched,city_matched,postal_code_matched,currency_code,cost,conversions,conv_value,impr,clicks
+10/16/2025,US | PMAX | Generic [BE]],Texas,United States,Dallas-Ft. Worth TX,Dallas,75201,AUD,76.45,1.75,574.62,676,16
+10/13/2025,US | PMAX | Generic [BE]],Kansas,United States,Kansas City MO,Overland Park,66062,AUD,44,2,451.94,94,6
+10/15/2025,US | PMAX | Generic [BE]],California,United States,Los Angeles CA,Los Angeles,91405,AUD,37.57,0,0,143,8
+10/19/2025,US | PMAX | Generic [BE]],New Mexico,United States,Albuquerque-Santa Fe NM,Albuquerque,87110,AUD,36.34,0,0,110,6

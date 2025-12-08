@@ -281,7 +281,7 @@ async def ingest_single_file(
         batch_size=payload.batch_size or 500,
     )
     normalized_path = context.normalized_path or context.file_path
-    log_path = get_ingestion_log_path()
+    log_path = get_ingestion_log_path() 
     return FileIngestionResponse(
         filename=payload.filename,
         file_path=context.file_path,
@@ -364,7 +364,7 @@ async def ingest_platform_files(
             fail_fast=context.fail_fast,
             batch_size=context.batch_size,
             column_map=context.column_map,
-        )
+        ) 
         result = await service.ingest(session, context)
         results.append(
             FileIngestionResponse(
@@ -380,6 +380,6 @@ async def ingest_platform_files(
                 normalized_path=context.normalized_path,
                 log_path=log_path,
             )
-        )
+        ) 
 
     return PlatformIngestionResponse(platform=payload.platform, results=results)

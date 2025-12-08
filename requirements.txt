@@ -12,4 +12,4 @@ prometheus-fastapi-instrumentator
 redis
 celery
 aioboto3
-httpx      
+httpx     
