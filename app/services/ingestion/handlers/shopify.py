@@ -92,6 +92,18 @@ class ShopifySalesHandler(ShopifyBaseHandler):
         "taxes": ShopifyMetricSpec("taxes", parse_decimal),
         "returning_customers": ShopifyMetricSpec("returning_customers", parse_decimal),
         "new_customers": ShopifyMetricSpec("new_customers", parse_decimal),
+        "orders_previous_month": ShopifyMetricSpec("orders_previous_month", parse_decimal),
+        "gross_sales_previous_month": ShopifyMetricSpec("gross_sales_previous_month", parse_decimal),
+        "total_sales_previous_month": ShopifyMetricSpec("total_sales_previous_month", parse_decimal),
+        "net_sales_previous_month": ShopifyMetricSpec("net_sales_previous_month", parse_decimal),
+        "duties_previous_month": ShopifyMetricSpec("duties_previous_month", parse_decimal),
+        "taxes_previous_month": ShopifyMetricSpec("taxes_previous_month", parse_decimal),
+        "returning_customers_previous_month": ShopifyMetricSpec(
+            "returning_customers_previous_month", parse_decimal
+        ),
+        "new_customers_previous_month": ShopifyMetricSpec(
+            "new_customers_previous_month", parse_decimal
+        ),
     }
 
     async def ingest(
