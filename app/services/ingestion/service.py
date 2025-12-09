@@ -1,7 +1,6 @@
 """High level service orchestrating file ingestion."""
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.marketing import EventIngestionLog
 from app.services.ingestion.handlers import HANDLERS
 from app.services.ingestion.dimensions import ensure_platform_id
-from app.services.ingestion.logging import get_ingestion_logger, log_event
+from app.services.ingestion.logging import (
+    format_exception_details,
+    get_ingestion_logger,
+    log_event,
+    log_exception,
+)
 from app.services.ingestion.types import IngestionContext, IngestionResult
 from app.services.ingestion.utils import (
     NormalizationResult,
@@ -171,9 +175,10 @@ class FileIngestionService:
             )
         except Exception as exc:  # noqa: BLE001
             status = "failed"
-            error_message = str(exc)
+            error_message = f"{exc.__class__.__name__}: {exc}"
+            traceback_str = format_exception_details(exc)
             result = IngestionResult()
-            result.warnings.append(str(exc))
+            result.warnings.append(traceback_str)
             result.finished_at = datetime.utcnow()
             result.status = status
             result.summary = (
@@ -186,7 +191,8 @@ class FileIngestionService:
                 handler=handler.__class__.__name__,
                 file=context.file_path,
                 error=error_message,
-            ) 
+                traceback=traceback_str,
+            )
             log_event(
                 "STAGE_COMPLETE",
                 stage="database_write",
@@ -194,10 +200,11 @@ class FileIngestionService:
                 handler=handler.__class__.__name__,
                 error=error_message,
             )
-            self._logger.exception(
-                "INGESTION_FAILED | handler=%s | error=%s",
-                handler.__class__.__name__,
+            log_exception(
+                "INGESTION_FAILED",
                 exc,
+                handler=handler.__class__.__name__,
+                file=context.file_path,
             )
             await self._log_event(session, context, result, status, error_message)
             log_event(
@@ -207,7 +214,14 @@ class FileIngestionService:
                 summary=result.summary,
             )
             # Surface the handler error in the API response to avoid opaque 500s.
-            raise HTTPException(status_code=500, detail=error_message)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": error_message,
+                    "traceback": traceback_str,
+                    "file": str(context.file_path),
+                },
+            )
         else:
             result.finished_at = datetime.utcnow()
             if context.dry_run:
