@@ -19,7 +19,12 @@ from app.schemas.ingestion import (
     PlatformIngestionResponse,
     UploadedFileMetadata,
 )
-from app.services.ingestion.logging import get_ingestion_log_path, log_event
+from app.services.ingestion.logging import (
+    format_exception_details,
+    get_ingestion_log_path,
+    log_event,
+    log_exception,
+)
 from app.services.ingestion.storage import resolve_uploaded_path
 from app.services.ingestion.service import FileIngestionService
 from app.services.ingestion.types import IngestionContext
@@ -163,11 +168,13 @@ async def normalize_uploaded_files(
             try:
                 normalization = normalize_file(file_path)
             except HTTPException as exc:
+                traceback_str = format_exception_details(exc)
                 log_event(
                     "NORMALIZATION_SWEEP_FAILED",
                     platform=platform.value,
                     file=file_path,
                     error=exc.detail,
+                    traceback=traceback_str,
                 )
                 results.append(
                     NormalizedFileResult(
@@ -180,16 +187,16 @@ async def normalize_uploaded_files(
                         encoding=None,
                         delimiter=None,
                         status="failed",
-                        detail=str(exc.detail),
+                        detail=f"{exc.detail}\n{traceback_str}",
                     )
                 )
                 continue
             except Exception as exc:  # pragma: no cover - defensive logging
-                log_event(
+                traceback_str = log_exception(
                     "NORMALIZATION_SWEEP_FAILED",
+                    exc,
                     platform=platform.value,
                     file=file_path,
-                    error=str(exc),
                 )
                 results.append(
                     NormalizedFileResult(
@@ -202,7 +209,7 @@ async def normalize_uploaded_files(
                         encoding=None,
                         delimiter=None,
                         status="failed",
-                        detail=str(exc),
+                        detail=f"{exc}\n{traceback_str}",
                     )
                 )
                 continue

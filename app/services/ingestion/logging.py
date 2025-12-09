@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import traceback
 from pathlib import Path
 
 from app.core.config import PROJECT_ROOT
@@ -98,3 +99,30 @@ def get_ingestion_log_path() -> Path:
 
 
 __all__ = ["get_ingestion_logger", "get_ingestion_log_path", "log_event"]
+
+
+def format_exception_details(exc: BaseException) -> str:
+    """Return a formatted traceback string for easier debugging."""
+
+    return "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    ).strip()
+
+
+def log_exception(event: str, exc: BaseException, **fields: object) -> str:
+    """Capture an exception with a stack trace in the ingestion log."""
+
+    traceback_str = format_exception_details(exc)
+    log_event(
+        event,
+        level=logging.ERROR,
+        error=f"{exc.__class__.__name__}: {exc}",
+        traceback=traceback_str,
+        **fields,
+    )
+    logger = get_ingestion_logger()
+    logger.error("%s | error=%s\n%s", event, exc, traceback_str)
+    return traceback_str
+
+
+__all__.extend(["format_exception_details", "log_exception"])
