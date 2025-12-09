@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
                                 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI_PATH = PROJECT_ROOT / "alembic.ini"
@@ -27,4 +30,8 @@ async def init_db() -> None:
     """Initialise the database by applying all available migrations."""
 
     settings = get_settings()
+    if not settings.INIT_DB_ON_STARTUP:
+        logger.info("INIT_DB_ON_STARTUP disabled; skipping migrations")
+        return
+
     await asyncio.to_thread(_upgrade_database, settings.DATABASE_URL)
