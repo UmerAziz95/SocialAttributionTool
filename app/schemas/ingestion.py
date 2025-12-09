@@ -42,7 +42,7 @@ class MultiFileUploadResponse(BaseModel):
     files: List[UploadedFileMetadata] = Field(
         ..., description="Metadata for each uploaded file in the request"
     )
-
+# model config
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -106,7 +106,7 @@ class FileIngestionRequest(BaseModel):
         ge=1,
         description="Optional batch size for DB writes",
     )
-
+# model_config
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -122,6 +122,7 @@ class FileIngestionRequest(BaseModel):
         }
     }
 
+# response class
 
 class FileIngestionResponse(BaseModel):
     """Outcome from a handler run."""
