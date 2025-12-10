@@ -32,11 +32,37 @@ each concern can evolve independently.
 
    ```bash
    alembic upgrade head
-   uvicorn app.main:app --reload                  
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
 The API will expose versioned endpoints beneath `/api/v1`, together with health checks
 under `/health` for operational monitoring.
+
+### Troubleshooting a refused connection on port 8000
+
+Seeing `127.0.0.1 refused to connect` even though Uvicorn printed that it started
+usually means the process exited before it could bind the port. On Windows
+machines this often happens because migrations run during start-up cannot reach
+the configured database. Try the following checks:
+
+1. **Verify the server is still running** – after the log line `Waiting for
+   application startup.` you should see `Application startup complete.`. If the
+   process exits, re-run the command in the virtual environment to view the
+   full traceback.
+2. **Confirm your database settings** – ensure `.env` contains a valid
+   `DATABASE_URL` that the device can reach. If the database is temporarily
+   unavailable, start the API without applying migrations by setting
+   `INIT_DB_ON_STARTUP=false` and manually run `alembic upgrade head` once the
+   database is reachable.
+3. **Bind to all interfaces** – use the command shown above with
+   `--host 0.0.0.0 --port 8000` to avoid Windows loopback quirks and make the
+   service reachable from other devices on the network.
+4. **Check for port conflicts** – if another process is listening on 8000,
+   either stop it or change the port in the command (for example,
+   `--port 8080`).
+
+After these steps, open http://127.0.0.1:8000/health/live to confirm the server
+is accepting connections.
 
 ### Configuration reference 
 
