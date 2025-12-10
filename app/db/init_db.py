@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import logging
+
 from alembic import command
 from alembic.config import Config
 
@@ -27,4 +29,12 @@ async def init_db() -> None:
     """Initialise the database by applying all available migrations."""
 
     settings = get_settings()
-    await asyncio.to_thread(_upgrade_database, settings.DATABASE_URL)
+    if not settings.INIT_DB_ON_STARTUP:
+        return
+
+    try:
+        await asyncio.to_thread(_upgrade_database, settings.DATABASE_URL)
+    except Exception:  # pragma: no cover - defensive logging
+        logging.getLogger(__name__).exception(
+            "Database initialisation failed. Check DATABASE_URL and connectivity."
+        )
