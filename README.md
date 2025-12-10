@@ -19,8 +19,9 @@ each concern can evolve independently.
    -----------venv\Scripts\activate
 2. Install dependencies: `pip install -r requirements.txt`.
 3. Provide a `.env` file or environment variables with the desired settings (database
-   URL, JWT secret, etc.). Start by copying the committed template and then adjust the
-   credentials for your local environment:                           
+   URL, JWT secret, etc.). The defaults allow the API to start against a local SQLite
+   database, but you should still copy the committed template and then adjust the
+   credentials for your local environment:
 
    ```bash
    cp .env.example .env               
@@ -28,15 +29,92 @@ each concern can evolve independently.
 
    Edit `.env` to point to your database instance and supply any other secrets that
    should not live in source control.
-4. Apply database migrations and launch the application locally:
+4. Apply database migrations (optional when using the default SQLite dev database) and
+   launch the application locally:
 
    ```bash
    alembic upgrade head
-   uvicorn app.main:app --reload                  
+   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
    ```
 
 The API will expose versioned endpoints beneath `/api/v1`, together with health checks
 under `/health` for operational monitoring.
+
+### Troubleshooting a refused connection on port 8000
+
+Seeing `127.0.0.1 refused to connect` even though Uvicorn printed that it started
+usually means the process exited before it could bind the port. On Windows
+machines this often happens because migrations run during start-up cannot reach
+the configured database. Try the following checks:
+
+1. **Verify the server is still running** – after the log line `Waiting for
+   application startup.` you should see `Application startup complete.`. If the
+   process exits, re-run the command in the virtual environment to view the
+   full traceback.
+2. **Confirm your database settings** – ensure `.env` contains a valid
+   `DATABASE_URL` that the device can reach. If the database is temporarily
+   unavailable, start the API without applying migrations by setting
+   `INIT_DB_ON_STARTUP=false` and manually run `alembic upgrade head` once the
+   database is reachable.
+3. **Bind to all interfaces** – use the command shown above with
+   `--host 0.0.0.0 --port 8000` to avoid Windows loopback quirks and make the
+   service reachable from other devices on the network.
+4. **Check for port conflicts** – if another process is listening on 8000,
+   either stop it or change the port in the command (for example,
+   `--port 8080`).
+
+After these steps, open http://127.0.0.1:8000/health/live to confirm the server
+is accepting connections.
+
+### Verifying a Postgres connection
+
+If you are using Postgres instead of the default SQLite database, run these checks
+from the same device that cannot reach the API:
+
+1. **Ensure Postgres is reachable on the network** – replace the host/port below
+   with your server and run:
+
+   ```bash
+   # Linux/macOS PowerShell and Windows Command Prompt syntax are the same here
+   psql "postgresql://<user>:<password>@<host>:<port>/<database>" -c "\conninfo"
+   ```
+
+   A successful response will show the connected database and host; an error like
+   `could not connect to server: Connection refused` means Postgres is blocked or
+   not running.
+2. **Confirm the Postgres service is up** – on the server hosting Postgres, check
+   the service status (examples):
+
+   ```bash
+   # Systemd-based Linux
+   sudo systemctl status postgresql
+
+   # Homebrew on macOS
+   brew services list | grep postgres
+   ```
+
+3. **Verify the server is listening on the expected port** – run locally on the
+   Postgres host:
+
+   ```bash
+   # Linux/macOS
+   sudo lsof -iTCP:5432 -sTCP:LISTEN
+
+   # Windows PowerShell
+   netstat -ano | findstr 5432
+   ```
+
+4. **Test credentials and schema access** – run a simple query using the same DSN
+   the API uses (again substitute your connection string):
+
+   ```bash
+   psql "postgresql://<user>:<password>@<host>:<port>/<database>" -c "SELECT 1;"
+   psql "postgresql://<user>:<password>@<host>:<port>/<database>" -c "\dt"
+   ```
+
+   These commands validate authentication and that the target database/schema are
+   accessible. If they fail, adjust the credentials, network rules, or
+   `pg_hba.conf` to permit the connection from your device.
 
 ### Configuration reference 
 
@@ -44,25 +122,24 @@ Key settings are provided through environment variables. During local developmen
 preferred approach is to configure them inside the `.env` file created from the
 template: 
 
-- `DATABASE_URL` – SQLAlchemy async connection string. Ensure the username/password in
-  the URL correspond to an existing database account; authentication failures during
-  start-up usually mean these credentials do not match the target instance. This value
-  must be supplied via `.env` (or the environment) before the app or Alembic commands
-  can run.
-- `INIT_DB_ON_STARTUP` – when `true` (default) the application will apply Alembic
-  migrations on start. Set it to `false` if schema management happens elsewhere or when
-  you want the server to boot without touching the database (for example, while pointing
-  the API to a remote staging database that is temporarily unavailable).
+- `DATABASE_URL` – SQLAlchemy async connection string. Defaults to a local SQLite
+  database at `sqlite+aiosqlite:///./data/app.db` so the server can boot without extra
+  services. Point it to your Postgres instance for shared development or production
+  usage.
+- `INIT_DB_ON_STARTUP` – when `true` the application will apply Alembic migrations on
+  start. Defaults to `false` to avoid blocking start-up when a database is unreachable;
+  enable it once the configured database is available.
 - `JWT_SECRET`, `JWT_ALG`, `ACCESS_TOKEN_EXPIRE_MIN` – security-related knobs for token
-  generation. Define `JWT_SECRET` in `.env` to keep it out of source control.
+  generation. Defaults include a development secret; override it in `.env` for any real
+  environment.
 - `CORS_ORIGINS` – list of origins allowed to call the API in browsers.
 
 ## Database migrations              
 
 Alembic manages schema changes for the project. The start-up hook in
-`app/db/init_db.py` automatically upgrades the database to the latest revision when
+`app/db/init_db.py` can automatically upgrade the database to the latest revision when
 `INIT_DB_ON_STARTUP=true`, but you can also run migrations manually from the command
-line. 
+line.
 
 ### Creating a new model and migration
 
