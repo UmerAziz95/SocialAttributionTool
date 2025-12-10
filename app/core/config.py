@@ -20,23 +20,27 @@ class Settings(BaseSettings):
     SQLALCHEMY_ECHO: bool = False
 
     DATABASE_URL: str = Field(
-        ...,
-        description="Database connection string in SQLAlchemy async format.",
+        "sqlite+aiosqlite:///./data/app.db",
+        description=(
+            "Database connection string in SQLAlchemy async format. Defaults to"
+            " a local SQLite database so the API can start without external"
+            " services."
+        ),
     )
     INIT_DB_ON_STARTUP: bool = Field(
-        True,
+        False,
         description=(
             "When true the application will apply Alembic migrations during"
             " startup to ensure the schema is up to date. Set to false if the"
             " database is managed externally or is not available in the current"
             " environment."
-        ),                                                        
-    )        
+        ),
+    )
     JWT_SECRET: str = Field(
-        ...,
+        "dev-secret-key",
         description="Secret used to sign JWT access tokens.",
     )
-    JWT_ALG: str = "HS256"                                                                
+    JWT_ALG: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MIN: int = 60
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
 
